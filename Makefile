@@ -1,4 +1,4 @@
-.PHONY: build-frontend build test test-race test-integration test-fuzz run docker-build audit clean
+.PHONY: build-frontend build test test-race test-integration test-fuzz run dev docker-build audit clean
 
 build-frontend:
 	cd frontend && npm ci && npm run build
@@ -41,6 +41,18 @@ audit:
 
 run: build
 	./backend/clipper
+
+# Backend only, against docker-compose's redis, with hot Go compilation
+# (go run, no embedded frontend build). Copy .env.example to .env first to
+# override defaults; unset vars fall back to the same values docker-compose
+# uses for redis.
+dev:
+	docker compose up -d redis
+	@bash -c 'set -a; [ -f .env ] && source .env; set +a; \
+		cd backend && STORE_BACKEND=$${STORE_BACKEND:-redis} \
+		REDIS_ADDR=$${REDIS_ADDR:-localhost:6379} \
+		REDIS_PASSWORD=$${REDIS_PASSWORD:-devpassword} \
+		go run ./cmd/clipper'
 
 docker-build:
 	docker build -t clipper .
