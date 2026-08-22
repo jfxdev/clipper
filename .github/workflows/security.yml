@@ -138,12 +138,13 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-      # The action errors out entirely when the repository has Dependency
-      # graph disabled, which is a settings decision no workflow can make
-      # for itself (Settings -> Code security -> Dependency graph). Probing
-      # for it and skipping is honest about that; blanket
-      # continue-on-error would not be, because it would also swallow a
-      # genuine high-severity finding the day the setting is turned on.
+      # Dependency graph is enabled on this repository, so the action runs
+      # and gates the build. The probe stays because the action errors out
+      # entirely where the feature is off — a fork, a clone, or a settings
+      # change — and that is a decision no workflow can make for itself
+      # (Settings -> Security -> Dependency graph). Probing and skipping is
+      # honest about that; blanket continue-on-error would not be, because
+      # it would also swallow a genuine high-severity finding.
       - name: check whether Dependency graph is enabled
         id: depgraph
         env:
@@ -157,13 +158,14 @@ jobs:
               ;;
             404)
               # The one response that means "this repository does not have
-              # Dependency graph" — confirmed against this repository, which
-              # answers 404 while the feature is off. 403 is deliberately
-              # NOT treated as a skip: GitHub also returns it for secondary
-              # rate limits and for a token without the right permission, so
-              # it cannot distinguish "feature off" from "ask again later".
+              # Dependency graph" — observed on this repository while the
+              # feature was still off, and 200 once it was enabled. 403 is
+              # deliberately NOT treated as a skip: GitHub also returns it
+              # for secondary rate limits and for a token without the right
+              # permission, so it cannot distinguish "feature off" from
+              # "ask again later".
               echo "enabled=false" >> "$GITHUB_OUTPUT"
-              echo "::warning title=Dependency review skipped::Dependency graph is disabled for this repository (HTTP $status from the SBOM endpoint). Enable it under Settings -> Code security to turn dependency review into an enforcing check. Vulnerable dependencies are still gated by the govulncheck and npm-audit jobs."
+              echo "::warning title=Dependency review skipped::Dependency graph is disabled for this repository (HTTP $status from the SBOM endpoint). Enable it under Settings -> Security to turn dependency review into an enforcing check. Vulnerable dependencies are still gated by the govulncheck and npm-audit jobs."
               ;;
             *)
               # Fail closed. A 403, a rate limit, an expired token, a
