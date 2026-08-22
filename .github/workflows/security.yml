@@ -155,16 +155,19 @@ jobs:
             200)
               echo "enabled=true" >> "$GITHUB_OUTPUT"
               ;;
-            403|404)
-              # The only two responses that actually mean "this repository
-              # does not have Dependency graph". Everything else is an
-              # unknown, handled below.
+            404)
+              # The one response that means "this repository does not have
+              # Dependency graph" — confirmed against this repository, which
+              # answers 404 while the feature is off. 403 is deliberately
+              # NOT treated as a skip: GitHub also returns it for secondary
+              # rate limits and for a token without the right permission, so
+              # it cannot distinguish "feature off" from "ask again later".
               echo "enabled=false" >> "$GITHUB_OUTPUT"
               echo "::warning title=Dependency review skipped::Dependency graph is disabled for this repository (HTTP $status from the SBOM endpoint). Enable it under Settings -> Code security to turn dependency review into an enforcing check. Vulnerable dependencies are still gated by the govulncheck and npm-audit jobs."
               ;;
             *)
-              # Fail closed. A rate limit, an expired token, a GitHub
-              # outage or a network error says nothing about whether the
+              # Fail closed. A 403, a rate limit, an expired token, a
+              # GitHub outage or a network error says nothing about whether the
               # feature is on — and silently skipping a supply-chain check
               # because an unrelated request wobbled is precisely the
               # fail-open behaviour this probe exists to avoid. A red job
