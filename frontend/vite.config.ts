@@ -22,4 +22,12 @@ export default defineConfig({
       "@": path.resolve(import.meta.dirname, "./src"),
     },
   },
+  server: {
+    // changeOrigin stays off (the default): keeping the Host header as
+    // localhost:5173 makes the backend's RequireSameOrigin check see the
+    // request as same-origin instead of rejecting it as cross-site.
+    proxy: {
+      "/api": "http://localhost:8080",
+    },
+  },
 })

@@ -42,17 +42,22 @@ audit:
 run: build
 	./backend/clipper
 
-# Backend only, against docker-compose's redis, with hot Go compilation
-# (go run, no embedded frontend build). Copy .env.example to .env first to
-# override defaults; unset vars fall back to the same values docker-compose
-# uses for redis.
+# Backend (go run, against docker-compose's redis) and frontend (vite, with
+# HMR) side by side. vite.config.ts proxies /api to the backend so the
+# browser only ever talks to http://localhost:5173. Copy .env.example to
+# .env first to override defaults; unset vars fall back to the same values
+# docker-compose uses for redis. Ctrl-C stops both.
 dev:
 	docker compose up -d redis
+	[ -d frontend/node_modules ] || (cd frontend && npm ci)
 	@bash -c 'set -a; [ -f .env ] && source .env; set +a; \
-		cd backend && STORE_BACKEND=$${STORE_BACKEND:-redis} \
-		REDIS_ADDR=$${REDIS_ADDR:-localhost:6379} \
-		REDIS_PASSWORD=$${REDIS_PASSWORD:-devpassword} \
-		go run ./cmd/clipper'
+		trap "kill 0" EXIT INT TERM; \
+		(cd backend && STORE_BACKEND=$${STORE_BACKEND:-redis} \
+			REDIS_ADDR=$${REDIS_ADDR:-localhost:6379} \
+			REDIS_PASSWORD=$${REDIS_PASSWORD:-devpassword} \
+			go run ./cmd/clipper) & \
+		(cd frontend && npm run dev) & \
+		wait'
 
 docker-build:
 	docker build -t clipper .
