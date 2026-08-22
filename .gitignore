@@ -1,0 +1,19 @@
+# Go
+/backend/clipper
+/backend/*.test
+/backend/internal/webembed/dist/*
+!/backend/internal/webembed/dist/.gitkeep
+
+# Node / frontend
+/frontend/node_modules/
+/frontend/dist/
+/frontend/.vite/
+npm-debug.log*
+
+# Editors / OS
+.DS_Store
+*.swp
+
+# Env
+.env
+.env.local
