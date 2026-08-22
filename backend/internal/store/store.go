@@ -21,16 +21,23 @@ var ErrNotFound = errors.New("store: paste not found")
 // part of Get (e.g. Redis GETDEL, Mongo FindOneAndDelete, DynamoDB
 // DeleteItem with ReturnValues=ALL_OLD) so two concurrent reads of a
 // burn-after-read paste can never both succeed.
+//
+// Implementations MUST also verify the caller's read token as part of that
+// same atomic step. A mismatched token returns ErrNotFound and MUST NOT
+// burn the paste — otherwise anyone who learns a paste ID could destroy a
+// burn-after-read message without being able to read it.
 type Store interface {
 	// Create stores a new paste. Implementations apply their own
 	// backend-native TTL mechanism from p.ExpiresAt (a zero value means the
 	// paste never expires).
 	Create(ctx context.Context, p paste.Paste) error
 
-	// Get retrieves a paste by ID. Returns ErrNotFound if it does not
-	// exist or has expired. If the stored paste has BurnAfterRead set, Get
-	// atomically deletes it as part of this call before returning it.
-	Get(ctx context.Context, id string) (paste.Paste, error)
+	// Get retrieves a paste by ID, but only if readToken matches the token
+	// recorded at creation time. Returns ErrNotFound if the paste does not
+	// exist, has expired, or the token does not match. If the stored paste
+	// has BurnAfterRead set, Get atomically deletes it as part of this call
+	// before returning it.
+	Get(ctx context.Context, id, readToken string) (paste.Paste, error)
 
 	// Close releases backend resources (connection pools, etc.) on
 	// shutdown.

@@ -6,6 +6,8 @@
 // (SubtleCrypto.encrypt/decrypt/importKey/deriveKey) require a concrete
 // ArrayBuffer-backed BufferSource, not a SharedArrayBuffer-backed one.
 
+const BASE64URL_PATTERN = /^[A-Za-z0-9_-]*$/
+
 export function bytesToBase64Url(bytes: Uint8Array<ArrayBuffer>): string {
   let binary = ""
   for (const byte of bytes) binary += String.fromCharCode(byte)
@@ -13,6 +15,12 @@ export function bytesToBase64Url(bytes: Uint8Array<ArrayBuffer>): string {
 }
 
 export function base64UrlToBytes(value: string): Uint8Array<ArrayBuffer> {
+  // Everything decoded here came off the wire from a server that could be
+  // hostile or simply wrong, so the alphabet is checked before atob rather
+  // than relying on atob's own (looser, standard-alphabet) parsing.
+  if (!BASE64URL_PATTERN.test(value)) {
+    throw new Error("value is not base64url")
+  }
   let base64 = value.replace(/-/g, "+").replace(/_/g, "/")
   while (base64.length % 4 !== 0) base64 += "="
   const binary = atob(base64)

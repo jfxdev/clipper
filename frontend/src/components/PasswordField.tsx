@@ -8,6 +8,7 @@ interface PasswordFieldProps {
   onChange: (value: string) => void
   placeholder?: string
   autoFocus?: boolean
+  hint?: string
 }
 
 export function PasswordField({
@@ -17,6 +18,7 @@ export function PasswordField({
   onChange,
   placeholder,
   autoFocus,
+  hint,
 }: PasswordFieldProps) {
   return (
     <div className="grid gap-1.5">
@@ -29,7 +31,11 @@ export function PasswordField({
         value={value}
         placeholder={placeholder}
         onChange={(e) => onChange(e.target.value)}
+        spellCheck={false}
+        autoCorrect="off"
+        autoCapitalize="off"
       />
+      {hint && <p className="text-muted-foreground text-xs">{hint}</p>}
     </div>
   )
 }

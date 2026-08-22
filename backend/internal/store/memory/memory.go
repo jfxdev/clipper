@@ -41,7 +41,7 @@ func (s *Store) Create(ctx context.Context, p paste.Paste) error {
 	return nil
 }
 
-func (s *Store) Get(ctx context.Context, id string) (paste.Paste, error) {
+func (s *Store) Get(ctx context.Context, id, readToken string) (paste.Paste, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -51,6 +51,12 @@ func (s *Store) Get(ctx context.Context, id string) (paste.Paste, error) {
 	}
 	if p.IsExpired(time.Now()) {
 		delete(s.pastes, id)
+		return paste.Paste{}, store.ErrNotFound
+	}
+	// Checked before the burn so a wrong token can never destroy a
+	// burn-after-read paste, and compared in constant time so the token
+	// cannot be recovered byte by byte from response latency.
+	if !paste.TokensMatch(p.ReadToken, readToken) {
 		return paste.Paste{}, store.ErrNotFound
 	}
 	if p.BurnAfterRead {

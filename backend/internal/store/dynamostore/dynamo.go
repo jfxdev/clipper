@@ -139,6 +139,7 @@ func ttlEnabledOrEnabling(ctx context.Context, client *dynamodb.Client, table st
 type item struct {
 	ID                string `dynamodbav:"id"`
 	Data              string `dynamodbav:"data"`
+	ReadToken         string `dynamodbav:"readToken"`
 	ExpiresAt         *int64 `dynamodbav:"expiresAt,omitempty"`
 	BurnAfterRead     bool   `dynamodbav:"burnAfterRead"`
 	PasswordProtected bool   `dynamodbav:"passwordProtected"`
@@ -150,6 +151,7 @@ func toItem(p paste.Paste) item {
 	it := item{
 		ID:                p.ID,
 		Data:              p.Data,
+		ReadToken:         p.ReadToken,
 		BurnAfterRead:     p.BurnAfterRead,
 		PasswordProtected: p.PasswordProtected,
 		CreatedAt:         p.CreatedAt.UTC().Format(time.RFC3339Nano),
@@ -166,6 +168,7 @@ func (it item) toPaste() (paste.Paste, error) {
 	p := paste.Paste{
 		ID:                it.ID,
 		Data:              it.Data,
+		ReadToken:         it.ReadToken,
 		BurnAfterRead:     it.BurnAfterRead,
 		PasswordProtected: it.PasswordProtected,
 		SizeBytes:         it.SizeBytes,
@@ -195,7 +198,7 @@ func (s *Store) Create(ctx context.Context, p paste.Paste) error {
 	return err
 }
 
-func (s *Store) Get(ctx context.Context, id string) (paste.Paste, error) {
+func (s *Store) Get(ctx context.Context, id, readToken string) (paste.Paste, error) {
 	key := map[string]types.AttributeValue{"id": &types.AttributeValueMemberS{Value: id}}
 
 	// Cheap read first: the common case (a non-burn-after-read paste) can
@@ -216,18 +219,27 @@ func (s *Store) Get(ctx context.Context, id string) (paste.Paste, error) {
 		return paste.Paste{}, err
 	}
 
+	// Token check before anything destructive: a caller holding only the
+	// paste ID must not be able to burn a message it cannot read. The
+	// conditional delete below re-checks the token server-side so the
+	// decision is still atomic with respect to concurrent readers.
+	if !paste.TokensMatch(peek.ReadToken, readToken) {
+		return paste.Paste{}, store.ErrNotFound
+	}
+
 	attrs := get.Item
 	if peek.BurnAfterRead {
-		// Atomic burn: only deletes (and returns) an item that is both
-		// present and still marked burn-after-read at delete time, so
-		// concurrent readers can never both succeed — even though both may
-		// have seen it via the GetItem above.
+		// Atomic burn: only deletes (and returns) an item that is present,
+		// token-matched, and still marked burn-after-read at delete time,
+		// so concurrent readers can never both succeed — even though both
+		// may have seen it via the GetItem above.
 		del, err := s.client.DeleteItem(ctx, &dynamodb.DeleteItemInput{
 			TableName:           aws.String(s.table),
 			Key:                 key,
-			ConditionExpression: aws.String("burnAfterRead = :true"),
+			ConditionExpression: aws.String("burnAfterRead = :true AND readToken = :token"),
 			ExpressionAttributeValues: map[string]types.AttributeValue{
-				":true": &types.AttributeValueMemberBOOL{Value: true},
+				":true":  &types.AttributeValueMemberBOOL{Value: true},
+				":token": &types.AttributeValueMemberS{Value: readToken},
 			},
 			ReturnValues: types.ReturnValueAllOld,
 		})

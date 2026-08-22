@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 
-import { encryptText, decryptBlob } from "./crypto"
+import { encryptText, decryptBlob, deriveReadToken } from "./crypto"
 
 describe("encryptText / decryptBlob", () => {
   it("round-trips plaintext with no password", async () => {
@@ -74,5 +74,81 @@ describe("encryptText / decryptBlob", () => {
     const tamperedBlob = JSON.stringify(parsed)
 
     await expect(decryptBlob(tamperedBlob, keyFragment)).rejects.toThrow(/iteration count/)
+  })
+})
+
+describe("blob header authentication", () => {
+  it("rejects a blob whose iteration count was altered in transit", async () => {
+    // `iter` travels outside the ciphertext, so it is only trustworthy
+    // because it is bound in as AES-GCM additional data. A server that
+    // rewrites it must not be able to make the recipient derive a
+    // different key without the tag check failing.
+    const { blob, keyFragment } = await encryptText("secret", "correct horse battery")
+    const parsed = JSON.parse(blob) as { iter: number; [k: string]: unknown }
+    parsed.iter = 310_000
+    await expect(
+      decryptBlob(JSON.stringify(parsed), keyFragment, "correct horse battery")
+    ).rejects.toThrow()
+  })
+
+  it("rejects a blob whose iv was altered", async () => {
+    const { blob, keyFragment } = await encryptText("secret")
+    const parsed = JSON.parse(blob) as { iv: string; [k: string]: unknown }
+    parsed.iv = parsed.iv[0] === "A" ? "B" + parsed.iv.slice(1) : "A" + parsed.iv.slice(1)
+    await expect(decryptBlob(JSON.stringify(parsed), keyFragment)).rejects.toThrow()
+  })
+
+  it("rejects non-base64url ciphertext instead of mis-decoding it", async () => {
+    const { blob, keyFragment } = await encryptText("secret")
+    const parsed = JSON.parse(blob) as { ct: string; [k: string]: unknown }
+    parsed.ct = "!!!not base64!!!"
+    await expect(decryptBlob(JSON.stringify(parsed), keyFragment)).rejects.toThrow(/base64url/)
+  })
+
+  it("rejects a blob that is not an object", async () => {
+    const { keyFragment } = await encryptText("secret")
+    await expect(decryptBlob("42", keyFragment)).rejects.toThrow()
+    await expect(decryptBlob("not json at all", keyFragment)).rejects.toThrow()
+  })
+})
+
+describe("length hiding", () => {
+  it("gives short messages of different lengths the same ciphertext size", async () => {
+    // Without padding the blob size leaks how long the message is, which
+    // for a PIN or a passphrase is most of what an observer wants to know.
+    const short = await encryptText("1234")
+    const longer = await encryptText("a somewhat longer secret message")
+    const size = (blob: string) => (JSON.parse(blob) as { ct: string }).ct.length
+    expect(size(short.blob)).toBe(size(longer.blob))
+  })
+
+  it("still round-trips payloads that cross a padding boundary", async () => {
+    for (const length of [0, 1, 251, 252, 253, 512, 1000]) {
+      const plaintext = "x".repeat(length)
+      const { blob, keyFragment } = await encryptText(plaintext)
+      expect(await decryptBlob(blob, keyFragment)).toBe(plaintext)
+    }
+  })
+
+  it("round-trips multi-byte characters near a boundary", async () => {
+    const plaintext = "🔐".repeat(80) // 4 bytes each, straddles 256 bytes
+    const { blob, keyFragment } = await encryptText(plaintext)
+    expect(await decryptBlob(blob, keyFragment)).toBe(plaintext)
+  })
+})
+
+describe("read token", () => {
+  it("is a stable base64url SHA-256 digest of the key fragment", async () => {
+    const { keyFragment, readToken } = await encryptText("secret")
+    expect(readToken).toMatch(/^[A-Za-z0-9_-]{43}$/)
+    expect(await deriveReadToken(keyFragment)).toBe(readToken)
+  })
+
+  it("differs for every paste, and reveals nothing about the fragment", async () => {
+    const a = await encryptText("secret")
+    const b = await encryptText("secret")
+    expect(a.readToken).not.toBe(b.readToken)
+    expect(a.readToken).not.toContain(a.keyFragment)
+    expect(a.keyFragment).not.toContain(a.readToken)
   })
 })

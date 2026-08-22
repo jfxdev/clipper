@@ -1,9 +1,11 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
+	"net"
 	"net/http"
 	"time"
 
@@ -16,22 +18,39 @@ import (
 // the configured size limit isn't rejected purely due to JSON framing.
 const requestOverhead = 1024
 
-// maxExpireSeconds caps how far in the future a paste can expire: one year,
-// which is comfortably under the ~9.223e9-second threshold at which
-// time.Duration(seconds) * time.Second would overflow int64 nanoseconds.
-const maxExpireSeconds int64 = 365 * 24 * 60 * 60
+// readTokenHeader carries the client's read token. A custom header is used
+// rather than a query parameter for two reasons: query strings end up in
+// proxy and access logs in a way headers do not, and requiring a custom
+// header makes the request non-simple, so a cross-origin read is stopped by
+// the browser's preflight before it ever reaches us.
+// #nosec G101 -- this is the name of an HTTP header, not a credential.
+const readTokenHeader = "X-Paste-Read-Token"
 
-type Handlers struct {
-	store             store.Store
-	maxPasteSizeBytes int64
+// HandlersConfig configures NewHandlers.
+type HandlersConfig struct {
+	MaxPasteSizeBytes int64
+
+	// MaxExpireSeconds is the longest lifetime a paste may request. Every
+	// paste must expire: an unbounded secret is a liability that outlives
+	// the reason it was shared.
+	MaxExpireSeconds int64
+
+	// Quota, when set, charges each accepted paste against the client's
+	// storage allowance.
+	Quota *Quota
 }
 
-func NewHandlers(s store.Store, maxPasteSizeBytes int64) *Handlers {
-	return &Handlers{store: s, maxPasteSizeBytes: maxPasteSizeBytes}
+type Handlers struct {
+	store store.Store
+	cfg   HandlersConfig
+}
+
+func NewHandlers(s store.Store, cfg HandlersConfig) *Handlers {
+	return &Handlers{store: s, cfg: cfg}
 }
 
 func (h *Handlers) CreatePaste(w http.ResponseWriter, r *http.Request) {
-	r.Body = http.MaxBytesReader(w, r.Body, h.maxPasteSizeBytes+requestOverhead)
+	r.Body = http.MaxBytesReader(w, r.Body, h.cfg.MaxPasteSizeBytes+requestOverhead)
 
 	var req createPasteRequest
 	dec := json.NewDecoder(r.Body)
@@ -54,21 +73,40 @@ func (h *Handlers) CreatePaste(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, errorResponse{Error: "invalid JSON body"})
 		return
 	}
-	if req.ExpireSeconds < 0 {
-		writeJSON(w, http.StatusBadRequest, errorResponse{Error: "expireSeconds must not be negative"})
+
+	if req.ExpireSeconds <= 0 {
+		writeJSON(w, http.StatusBadRequest, errorResponse{Error: "expireSeconds must be positive: pastes must expire"})
 		return
 	}
-	if req.ExpireSeconds > maxExpireSeconds {
-		writeJSON(w, http.StatusBadRequest, errorResponse{Error: "expireSeconds is too large"})
+	if req.ExpireSeconds > h.cfg.MaxExpireSeconds {
+		writeJSON(w, http.StatusBadRequest, errorResponse{Error: "expireSeconds exceeds the maximum retention window"})
 		return
 	}
-	if err := paste.Validate(req.Data, h.maxPasteSizeBytes); err != nil {
+	if err := paste.ValidateReadToken(req.ReadToken); err != nil {
+		writeJSON(w, http.StatusBadRequest, errorResponse{Error: "readToken must be a base64url SHA-256 digest"})
+		return
+	}
+	if err := paste.Validate(req.Data, h.cfg.MaxPasteSizeBytes); err != nil {
 		writeError(w, err)
+		return
+	}
+
+	// Charged only after validation, so malformed requests can't burn a
+	// client's allowance, and before the write, so the allowance actually
+	// bounds what reaches storage. A failed write refunds it below —
+	// otherwise a datastore outage would silently spend the allowance of
+	// every client that hit it, and keep denying them after it recovered.
+	size := int64(len(req.Data))
+	if h.cfg.Quota != nil && !h.cfg.Quota.Charge(r, size) {
+		writeError(w, ErrQuotaExceeded)
 		return
 	}
 
 	id, err := paste.NewID()
 	if err != nil {
+		if h.cfg.Quota != nil {
+			h.cfg.Quota.Refund(r, size)
+		}
 		writeError(w, err)
 		return
 	}
@@ -77,16 +115,26 @@ func (h *Handlers) CreatePaste(w http.ResponseWriter, r *http.Request) {
 	p := paste.Paste{
 		ID:                id,
 		Data:              req.Data,
+		ReadToken:         req.ReadToken,
 		BurnAfterRead:     req.BurnAfterRead,
 		PasswordProtected: req.PasswordProtected,
 		CreatedAt:         now,
 		SizeBytes:         len(req.Data),
-	}
-	if req.ExpireSeconds > 0 {
-		p.ExpiresAt = now.Add(time.Duration(req.ExpireSeconds) * time.Second)
+		ExpiresAt:         now.Add(time.Duration(req.ExpireSeconds) * time.Second),
 	}
 
 	if err := h.store.Create(r.Context(), p); err != nil {
+		// Refund only when the write definitively did not happen. Store.Create
+		// reports an error, not an outcome: a deadline or cancellation can fire
+		// after the datastore already committed, and refunding that "unknown"
+		// would let a client retry its way past the quota — each attempt
+		// charged once and refunded once while pastes accumulate. Failures
+		// that never reached the store (a refused connection, a rejected
+		// request) are not ambiguous and are refunded, which is what keeps an
+		// outage from silently consuming everyone's allowance.
+		if h.cfg.Quota != nil && !writeOutcomeIsUnknown(r.Context(), err) {
+			h.cfg.Quota.Refund(r, size)
+		}
 		writeError(w, err)
 		return
 	}
@@ -94,14 +142,34 @@ func (h *Handlers) CreatePaste(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, createPasteResponse{ID: id})
 }
 
+// writeOutcomeIsUnknown reports whether a failed store write may still have
+// been committed on the far side. Timeouts and cancellations are the
+// ambiguous cases: the request was in flight, and the error says only that
+// we stopped waiting for the answer.
+func writeOutcomeIsUnknown(ctx context.Context, err error) bool {
+	if ctx.Err() != nil {
+		return true
+	}
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+		return true
+	}
+	var netErr net.Error
+	return errors.As(err, &netErr) && netErr.Timeout()
+}
+
 func (h *Handlers) GetPaste(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	if id == "" {
-		writeJSON(w, http.StatusBadRequest, errorResponse{Error: "missing paste id"})
+	if err := paste.ValidateID(id); err != nil {
+		writeError(w, err)
+		return
+	}
+	token := r.Header.Get(readTokenHeader)
+	if err := paste.ValidateReadToken(token); err != nil {
+		writeError(w, err)
 		return
 	}
 
-	p, err := h.store.Get(r.Context(), id)
+	p, err := h.store.Get(r.Context(), id, token)
 	if err != nil {
 		writeError(w, err)
 		return

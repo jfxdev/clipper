@@ -1,10 +1,15 @@
 import { textToBytes } from "./encoding"
 
-// Current PBKDF2 work factor for new pastes. This is intentionally NOT
-// baked into decryption directly — decryptBlob reads the iteration count
-// that was stored alongside the paste at encryption time, so raising this
-// constant in a future release doesn't break decrypting older pastes.
-export const PBKDF2_ITERATIONS = 310_000
+// Current PBKDF2 work factor for new pastes, at the OWASP recommendation
+// for PBKDF2-HMAC-SHA256. This is intentionally NOT baked into decryption
+// directly — decryptBlob reads the iteration count that was stored
+// alongside the paste at encryption time, so raising this constant in a
+// future release doesn't break decrypting older pastes.
+//
+// The work factor matters more here than in a login form: the ciphertext is
+// downloadable by anyone holding the link, so guessing the password is an
+// offline attack with no server-side lockout to slow it down.
+export const PBKDF2_ITERATIONS = 600_000
 
 /**
  * Derives the actual AES-256-GCM key used to encrypt/decrypt a paste.

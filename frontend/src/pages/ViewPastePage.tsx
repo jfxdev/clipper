@@ -15,8 +15,22 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { PasswordField } from "@/components/PasswordField"
 import { BurnConfirmDialog } from "@/components/BurnConfirmDialog"
 import { getPaste, ApiError, type GetPasteResponse } from "@/api/client"
-import { decryptBlob } from "@/crypto/crypto"
+import { decryptBlob, deriveReadToken } from "@/crypto/crypto"
 import { parseShareHash } from "@/lib/shareLink"
+
+// clearKeyFragment removes the decryption key from the address bar and from
+// the history entry once it has been used. It does not undo the fact that
+// the key was in the URL — that is inherent to the design — but it keeps it
+// out of a screen-shared address bar, a screenshot, and the entry a later
+// visitor to this browser can read out of the history.
+function clearKeyFragment() {
+  try {
+    window.history.replaceState(null, "", window.location.pathname + window.location.search)
+  } catch {
+    // Some embedded webviews disallow replaceState; nothing here is
+    // load-bearing for security, so a failure is not worth surfacing.
+  }
+}
 
 type Phase =
   | { kind: "invalid-link" }
@@ -50,12 +64,17 @@ function ViewPasteInner({ id }: { id?: string }) {
     if (!id || !hashInfo) return
     setPhase({ kind: "loading" })
     try {
-      const paste = await getPaste(id)
+      // The read token proves we hold the full link. Without it the server
+      // returns 404 — which is what stops anyone who merely saw the paste
+      // ID from reading, or burning, this message.
+      const readToken = await deriveReadToken(hashInfo.keyFragment)
+      const paste = await getPaste(id, readToken)
       if (paste.passwordProtected && password === undefined) {
         setPhase({ kind: "needs-password", paste })
         return
       }
       const plaintext = await decryptBlob(paste.data, hashInfo.keyFragment, password)
+      clearKeyFragment()
       setPhase({ kind: "ready", plaintext, burnAfterRead: paste.burnAfterRead })
     } catch (err) {
       setPhase({
@@ -83,6 +102,7 @@ function ViewPasteInner({ id }: { id?: string }) {
     if (!hashInfo) return
     try {
       const plaintext = await decryptBlob(paste.data, hashInfo.keyFragment, password)
+      clearKeyFragment()
       setPhase({ kind: "ready", plaintext, burnAfterRead: paste.burnAfterRead })
     } catch {
       setPhase({ kind: "needs-password", paste, error: "Senha incorreta. Tente novamente." })

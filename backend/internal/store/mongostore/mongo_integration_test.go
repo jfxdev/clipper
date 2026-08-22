@@ -14,7 +14,9 @@ import (
 func TestMongoStore(t *testing.T) {
 	uri := os.Getenv("MONGO_URI")
 	if uri == "" {
-		uri = "mongodb://localhost:27017"
+		// Credentials match docker-compose.yml, which runs MongoDB with
+		// authentication enabled rather than wide open on localhost.
+		uri = "mongodb://clipper:devpassword@localhost:27017/?authSource=admin"
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

@@ -13,8 +13,39 @@ plaintext or the decryption key, which travels solely in the URL fragment
   API and the static app.
 - **Features**: time-based expiration, burn-after-read, an optional
   additional password (mixed into the encryption key via PBKDF2), a
-  per-paste size limit, and per-IP rate limiting. Text only — no file
-  attachments.
+  per-paste size limit, and per-client rate limiting and storage quotas.
+  Text only — no file attachments.
+
+## Security model
+
+The short version, with the full statement (and the known limits) in
+[SECURITY.md](SECURITY.md):
+
+- **The server cannot read a paste.** Encryption happens in the browser;
+  the key travels only in the URL fragment, which is never sent over the
+  network.
+- **A paste ID grants nothing on its own.** Reads require a *read token* —
+  `base64url(SHA-256(key fragment))` — sent in the `X-Paste-Read-Token`
+  header. An ID that leaks into a proxy log or a chat preview cannot be
+  used to fetch the ciphertext, and cannot be used to destroy a
+  burn-after-read message either: the token is checked inside the same
+  atomic operation that performs the burn.
+- **The blob header is authenticated.** The format version and PBKDF2
+  iteration count travel outside the ciphertext but are bound in as AES-GCM
+  additional data, so a hostile server cannot rewrite them unnoticed.
+- **Message length is padded** to 256-byte blocks, so the stored size does
+  not reveal how short a secret is.
+- **Every response carries a strict CSP** (`default-src 'none'`,
+  `script-src 'self'`, no inline script), `no-store`, `no-referrer` and
+  `frame-ancestors 'none'`. An XSS here would hand over the decryption key
+  in `location.hash`, so the policy is the load-bearing control, not a
+  formality.
+- **Pastes must expire.** `MAX_EXPIRE_SECONDS` caps the retention window
+  and there is no "never" option.
+
+Report a vulnerability through the [private advisory
+form](https://github.com/jfxdev/clipper/security/advisories/new), never a
+public issue. `/.well-known/security.txt` carries the same pointer.
 
 ## Quick start
 
@@ -26,7 +57,7 @@ docker compose up -d redis
 make build-frontend
 make build
 
-STORE_BACKEND=redis REDIS_ADDR=localhost:6379 ./backend/clipper
+STORE_BACKEND=redis REDIS_ADDR=localhost:6379 REDIS_PASSWORD=devpassword ./backend/clipper
 ```
 
 Open `http://localhost:8080`.
@@ -43,16 +74,32 @@ All configuration is via environment variables (see
 | `REDIS_ADDR` / `REDIS_PASSWORD` / `REDIS_DB` | `localhost:6379` / `""` / `0` | Redis backend |
 | `MONGO_URI` / `MONGO_DATABASE` / `MONGO_COLLECTION` | `mongodb://localhost:27017` / `clipper` / `pastes` | MongoDB backend |
 | `DYNAMO_TABLE` / `DYNAMO_ENDPOINT` / `DYNAMO_REGION` | `clipper_pastes` / `""` / `us-east-1` | DynamoDB backend (`DYNAMO_ENDPOINT` for dynamodb-local) |
-| `RATE_LIMIT_RPS` / `RATE_LIMIT_BURST` | `5` / `10` | Per-IP token bucket for `POST /api/paste` and `GET /api/paste/{id}` |
+| `REDIS_TLS` | `false` | Connect to Redis over TLS (certificate verification is always on) |
+| `RATE_LIMIT_RPS` / `RATE_LIMIT_BURST` | `5` / `10` | Per-client token bucket. IPv6 clients are bucketed per `/64`, not per address |
+| `GLOBAL_RATE_LIMIT_RPS` / `GLOBAL_RATE_LIMIT_BURST` | `200` / `400` | Ceiling shared by all clients, so a flood spread over many addresses is still capped |
+| `RATE_LIMIT_MAX_CLIENTS` | `100000` | Cap on tracked client buckets; beyond it new clients share an overflow bucket instead of allocating |
+| `QUOTA_PASTES_PER_DAY` / `QUOTA_BYTES_PER_DAY` | `200` / `67108864` (64MB) | Rolling 24h storage allowance per client |
 | `MAX_PASTE_SIZE_BYTES` | `2097152` (2MB) | Max size of the (already-encrypted) paste payload |
-| `TRUST_PROXY` | `false` | Trust `X-Forwarded-For` for rate limiting; only enable behind a trusted reverse proxy |
+| `MAX_EXPIRE_SECONDS` | `2592000` (30d) | Longest lifetime a paste may request. Pastes must expire; "never" is not offered |
+| `TRUSTED_PROXIES` | `""` | Comma-separated CIDRs. `X-Forwarded-For` is only read when the direct peer is in this set |
+| `TRUST_PROXY` | `false` | Blunt alternative: trust `X-Forwarded-For` from any direct peer. Only safe when nothing but the reverse proxy can reach the port |
+| `HSTS_MAX_AGE_SECONDS` | `0` | Emit `Strict-Transport-Security` when > 0. Turn on once TLS terminates in front |
+
+Startup logs a warning for configurations that are valid but risky in
+production (in-memory store, `X-Forwarded-For` handling that will either
+collapse or be spoofable, plaintext Redis over a network).
 
 ## Development
 
 ```bash
 # backend
 cd backend && go test ./...              # unit tests (no external deps)
+go test -race ./...                      # burn-after-read is a concurrency contract
 go test -tags=integration ./...          # + real redis/mongo/dynamodb-local
+
+cd ..                                    # the Make targets live at the root
+make test-fuzz                           # fuzz the ID/envelope validators
+make audit                               # govulncheck + npm audit
 
 # frontend
 cd frontend && npm install
@@ -61,4 +108,15 @@ npm test -- --run                        # crypto round-trip tests etc.
 ```
 
 `docker-compose.yml` provides local Redis, MongoDB, and dynamodb-local for
-running the integration test suite.
+running the integration test suite. All three are bound to `127.0.0.1` and
+the ones that support it require a password, so a laptop on an untrusted
+network is not exposing an open database.
+
+## Container image
+
+`make docker-build` produces a `FROM scratch` image: the only files in it
+are the static binary and a CA bundle. There is no shell, no package
+manager and no libc to pivot to, and the health check is the binary probing
+itself (`clipper -healthcheck`) because there is no `curl` to call. Base
+images are pinned by digest and the compose reference deployment runs it
+read-only, with all capabilities dropped and `no-new-privileges` set.

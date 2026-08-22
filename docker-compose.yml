@@ -1,16 +1,70 @@
+# Local development stack for the integration test suite.
+#
+# Images are pinned by digest for the same reason the Dockerfile pins its
+# bases: a tag is mutable, so what `docker compose up` pulls tomorrow is not
+# necessarily what was reviewed today. Dependabot's docker ecosystem keeps
+# these current.
+#
+# Every datastore here is bound to 127.0.0.1 rather than 0.0.0.0. Published
+# on all interfaces — the Docker default — a Redis or MongoDB with no
+# authentication is reachable by anyone who can route to the host, and both
+# are among the most-scanned ports on the internet. Binding to loopback
+# means a laptop on a café network, or a cloud VM with a public IP, does not
+# quietly expose an open database.
 services:
   redis:
-    image: redis:7-alpine
+    image: redis:7-alpine@sha256:ff02b58f971e7d7d156a1267e283fcbbeee91773b6aa36c49dac28ecfe28eadf
+    command:
+      - redis-server
+      - --requirepass
+      - ${REDIS_PASSWORD:-devpassword}
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"
+    read_only: true
+    tmpfs:
+      - /data
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
 
   mongo:
-    image: mongo:7
+    image: mongo:7@sha256:b6421fd6d1c5ded6377b397d8983e2f82e2100dc5123332dcfda2065a472be5b
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_USERNAME:-clipper}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_PASSWORD:-devpassword}
     ports:
-      - "27017:27017"
+      - "127.0.0.1:27017:27017"
+    security_opt:
+      - no-new-privileges:true
 
   dynamodb-local:
-    image: amazon/dynamodb-local:latest
+    image: amazon/dynamodb-local:latest@sha256:ff89bd48ff32cd8d9be5fee8873b65b8854dc408f1afe881be6eb00247bc0dab
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     command: ["-jar", "DynamoDBLocal.jar", "-inMemory", "-sharedDb"]
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+
+  # Reference deployment of the app itself, showing the container-level
+  # hardening the scratch image is built for: nothing writable, no
+  # capabilities, no way to gain privileges, and bounded memory so one
+  # container cannot take the host down with it.
+  clipper:
+    build: .
+    profiles: ["app"]
+    environment:
+      STORE_BACKEND: redis
+      REDIS_ADDR: redis:6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-devpassword}
+      # Set TRUSTED_PROXIES to your reverse proxy's CIDR in a real
+      # deployment, and HSTS_MAX_AGE_SECONDS once TLS terminates in front.
+    ports:
+      - "127.0.0.1:8080:8080"
+    depends_on: [redis]
+    read_only: true
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 256m
+    pids_limit: 128

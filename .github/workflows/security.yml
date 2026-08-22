@@ -1,0 +1,232 @@
+name: Security
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  schedule:
+    # Weekly, so a newly disclosed vulnerability in a dependency surfaces
+    # even when nobody has pushed. Most advisories land against code that
+    # was already written.
+    - cron: "17 6 * * 1"
+
+permissions:
+  contents: read
+
+# Go 1.24 is out of support and its standard library carries unfixable
+# advisories, so every Go job here runs on a supported line. backend/go.mod
+# pins the same toolchain so local builds cannot drift below it.
+env:
+  GO_VERSION: "1.26"
+
+jobs:
+  govulncheck:
+    name: Go vulnerability scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: backend/go.sum
+      # Installed rather than run through golang/govulncheck-action: the
+      # action is a third party pinned only by a moving tag, and it forces
+      # GOTOOLCHAIN=local, which breaks the moment govulncheck needs a newer
+      # toolchain than the runner has. A version-pinned `go install` is also
+      # stronger supply-chain wise — the module proxy verifies it against
+      # the public checksum database.
+      #
+      # govulncheck is call-graph aware: it only reports advisories whose
+      # vulnerable symbols this code actually reaches, so its findings are
+      # worth acting on rather than triaging away.
+      - name: govulncheck
+        working-directory: backend
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@v1.7.0
+          govulncheck ./...
+
+  staticcheck:
+    name: Go static analysis
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: backend/go.sum
+      - name: staticcheck
+        working-directory: backend
+        run: |
+          go install honnef.co/go/tools/cmd/staticcheck@v0.8.1
+          staticcheck ./...
+
+  gosec:
+    name: Go security linter
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: backend/go.sum
+      - name: gosec
+        working-directory: backend
+        run: |
+          go install github.com/securego/gosec/v2/cmd/gosec@v2.28.0
+          gosec -exclude-generated ./...
+
+  npm-audit:
+    name: npm dependency audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: npm audit
+        working-directory: frontend
+        run: npm audit --audit-level=high
+
+  codeql:
+    name: CodeQL
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [go, javascript-typescript]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@v5
+        if: matrix.language == 'go'
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: backend/go.sum
+      - uses: github/codeql-action/init@v3
+        with:
+          # The input is `languages` (plural). Spelled `language`, it is
+          # silently ignored and every matrix job auto-detects instead of
+          # analysing the one it was given.
+          languages: ${{ matrix.language }}
+          queries: security-extended
+      - uses: github/codeql-action/autobuild@v3
+      - uses: github/codeql-action/analyze@v3
+
+  dependency-review:
+    name: Dependency review
+    # Only meaningful on a PR, where there is a base to diff against.
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      # Dependency graph is enabled on this repository, so the action runs
+      # and gates the build. The probe stays because the action errors out
+      # entirely where the feature is off — a fork, a clone, or a settings
+      # change — and that is a decision no workflow can make for itself
+      # (Settings -> Security -> Dependency graph). Probing and skipping is
+      # honest about that; blanket continue-on-error would not be, because
+      # it would also swallow a genuine high-severity finding.
+      - name: check whether Dependency graph is enabled
+        id: depgraph
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          api="https://api.github.com/repos/${GITHUB_REPOSITORY}/dependency-graph/sbom"
+          status=$(curl -sS -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" "$api" || echo 000)
+          case "$status" in
+            200)
+              echo "enabled=true" >> "$GITHUB_OUTPUT"
+              ;;
+            404)
+              # The one response that means "this repository does not have
+              # Dependency graph" — observed on this repository while the
+              # feature was still off, and 200 once it was enabled. 403 is
+              # deliberately NOT treated as a skip: GitHub also returns it
+              # for secondary rate limits and for a token without the right
+              # permission, so it cannot distinguish "feature off" from
+              # "ask again later".
+              echo "enabled=false" >> "$GITHUB_OUTPUT"
+              echo "::warning title=Dependency review skipped::Dependency graph is disabled for this repository (HTTP $status from the SBOM endpoint). Enable it under Settings -> Security to turn dependency review into an enforcing check. Vulnerable dependencies are still gated by the govulncheck and npm-audit jobs."
+              ;;
+            *)
+              # Fail closed. A 403, a rate limit, an expired token, a
+              # GitHub outage or a network error says nothing about whether the
+              # feature is on — and silently skipping a supply-chain check
+              # because an unrelated request wobbled is precisely the
+              # fail-open behaviour this probe exists to avoid. A red job
+              # here is re-runnable; a skipped one is invisible.
+              echo "::error title=Dependency review probe failed::Could not determine whether Dependency graph is enabled (HTTP $status from the SBOM endpoint). Refusing to skip the check on an unknown response."
+              exit 1
+              ;;
+          esac
+      # No continue-on-error: when this runs at all, a high-severity
+      # finding fails the build.
+      - uses: actions/dependency-review-action@v4
+        if: steps.depgraph.outputs.enabled == 'true'
+        with:
+          fail-on-severity: high
+
+  container:
+    name: Container image scan and SBOM
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: build image
+        run: |
+          docker build -t clipper:ci .
+          # Exported as an archive so the scanners below can read the image
+          # without being handed the Docker socket — mounting that into a
+          # third-party container is root on the runner.
+          docker save clipper:ci -o "${RUNNER_TEMP}/clipper-image.tar"
+      # Trivy and Syft run from digest-pinned images rather than their
+      # marketplace actions, which are published under moving refs
+      # (trivy-action@master most of all). Same tool, same version, but the
+      # bytes that execute here cannot change under us.
+      #
+      # A scratch image has almost no surface for this to find, which is the
+      # point — the scan is here to catch the day someone "just adds a shell
+      # for debugging" and quietly reintroduces a distro's worth of CVEs,
+      # and to flag an out-of-support Go toolchain compiled into the binary.
+      - name: trivy
+        run: |
+          docker run --rm \
+            -v "${RUNNER_TEMP}:/scan" \
+            aquasec/trivy:0.74.0@sha256:62b1e65e8869bc4b4c6aa4fa2b21595256c7c2f6018a9d9ad61caf87187c1969 \
+            image \
+              --input /scan/clipper-image.tar \
+              --format table \
+              --exit-code 1 \
+              --severity HIGH,CRITICAL \
+              --ignore-unfixed
+      - name: generate SBOM
+        run: |
+          docker run --rm \
+            -v "${RUNNER_TEMP}:/scan" \
+            anchore/syft:v1.51.0@sha256:678bfa565b60f747aac0f8e964fe5588a24445b8d0a480e91f6efd70020dfbb0 \
+            scan docker-archive:/scan/clipper-image.tar \
+            -o spdx-json=/scan/clipper-sbom.spdx.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: clipper-sbom
+          path: ${{ runner.temp }}/clipper-sbom.spdx.json

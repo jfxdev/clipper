@@ -23,6 +23,12 @@ import { buildShareUrl } from "@/lib/shareLink"
 
 const DEFAULT_EXPIRE_SECONDS = 86400 // 1 day
 
+// The ciphertext is downloadable by anyone holding the link, so guessing
+// the extra password is an offline attack: there is no server-side lockout
+// to slow it down, only the PBKDF2 work factor. A short password buys very
+// little against that, so a floor is enforced rather than suggested.
+const MIN_PASSWORD_LENGTH = 10
+
 export function CreatePastePage() {
   const [text, setText] = useState("")
   const [expireSeconds, setExpireSeconds] = useState(DEFAULT_EXPIRE_SECONDS)
@@ -38,17 +44,25 @@ export function CreatePastePage() {
       setError("Digite algum texto para compartilhar.")
       return
     }
+    if (password && password.length < MIN_PASSWORD_LENGTH) {
+      setError(
+        `A senha adicional precisa ter pelo menos ${MIN_PASSWORD_LENGTH} caracteres — ` +
+          "quem tem o link pode tentar adivinhá-la offline, sem limite de tentativas."
+      )
+      return
+    }
 
     setSubmitting(true)
     setError(null)
     try {
       // Encrypt entirely client-side before anything is sent to the server.
-      const { blob, keyFragment } = await encryptText(text, password || undefined)
+      const { blob, keyFragment, readToken } = await encryptText(text, password || undefined)
       const { id } = await createPaste({
         data: blob,
         expireSeconds,
         burnAfterRead,
         passwordProtected: password.length > 0,
+        readToken,
       })
       setShareUrl(buildShareUrl(id, keyFragment, burnAfterRead))
       // Drop the plaintext and password from state as soon as we no longer
@@ -127,6 +141,7 @@ export function CreatePastePage() {
             value={password}
             onChange={setPassword}
             placeholder="Deixe em branco para não usar senha"
+            hint={`Se usar, escolha uma frase de pelo menos ${MIN_PASSWORD_LENGTH} caracteres e combine-a por outro canal, nunca junto com o link.`}
           />
 
           {error && (

@@ -1,0 +1,33 @@
+version: 2
+updates:
+  # GitHub Actions are referenced by mutable tags (@v4), so an upstream
+  # compromise reaches this repository without anything changing here.
+  # Dependabot rewrites them to pinned commit SHAs and keeps them current,
+  # which is the practical way to get supply-chain pinning without hand
+  # editing a digest every week.
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+
+  - package-ecosystem: gomod
+    directory: /backend
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+
+  - package-ecosystem: npm
+    directory: /frontend
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+
+  # Keeps the digest-pinned base images in the Dockerfile from going stale,
+  # which is the trade-off pinning by digest makes: reproducible, but frozen
+  # until something updates it.
+  - package-ecosystem: docker
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
