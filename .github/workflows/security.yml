@@ -180,7 +180,7 @@ jobs:
           esac
       # No continue-on-error: when this runs at all, a high-severity
       # finding fails the build.
-      - uses: actions/dependency-review-action@v4
+      - uses: actions/dependency-review-action@v5
         if: steps.depgraph.outputs.enabled == 'true'
         with:
           fail-on-severity: high
