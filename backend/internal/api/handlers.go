@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"time"
 
@@ -14,6 +15,11 @@ import (
 // booleans, numbers) around the opaque Data payload, so a paste right at
 // the configured size limit isn't rejected purely due to JSON framing.
 const requestOverhead = 1024
+
+// maxExpireSeconds caps how far in the future a paste can expire: one year,
+// which is comfortably under the ~9.223e9-second threshold at which
+// time.Duration(seconds) * time.Second would overflow int64 nanoseconds.
+const maxExpireSeconds int64 = 365 * 24 * 60 * 60
 
 type Handlers struct {
 	store             store.Store
@@ -28,7 +34,9 @@ func (h *Handlers) CreatePaste(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, h.maxPasteSizeBytes+requestOverhead)
 
 	var req createPasteRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	dec := json.NewDecoder(r.Body)
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&req); err != nil {
 		// http.MaxBytesReader surfaces the size limit as a body-read error
 		// during JSON decoding, not as a distinct step we can check first —
 		// detect it here so oversized requests map to 413, not a generic 400.
@@ -40,8 +48,18 @@ func (h *Handlers) CreatePaste(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, errorResponse{Error: "invalid JSON body"})
 		return
 	}
+	// A second Decode must hit EOF — otherwise there's a second JSON value
+	// or trailing garbage after the first one, which Decode alone ignores.
+	if err := dec.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		writeJSON(w, http.StatusBadRequest, errorResponse{Error: "invalid JSON body"})
+		return
+	}
 	if req.ExpireSeconds < 0 {
 		writeJSON(w, http.StatusBadRequest, errorResponse{Error: "expireSeconds must not be negative"})
+		return
+	}
+	if req.ExpireSeconds > maxExpireSeconds {
+		writeJSON(w, http.StatusBadRequest, errorResponse{Error: "expireSeconds is too large"})
 		return
 	}
 	if err := paste.Validate(req.Data, h.maxPasteSizeBytes); err != nil {

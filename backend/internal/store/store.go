@@ -1,6 +1,5 @@
 // Package store defines the Store contract that every backing storage
-// implementation (redis, mongo, dynamo, memory) must satisfy, plus the
-// factory that picks a concrete implementation from config.
+// implementation (redis, mongo, dynamo, memory) must satisfy.
 package store
 
 import (

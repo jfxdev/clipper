@@ -18,6 +18,7 @@ func newTestRouter(t *testing.T, maxSize int64, rps float64, burst int) http.Han
 	t.Cleanup(func() { _ = s.Close(context.Background()) })
 	h := NewHandlers(s, maxSize)
 	rl := NewRateLimiter(rps, burst, false)
+	t.Cleanup(rl.Close)
 	return NewRouter(h, rl)
 }
 
@@ -29,7 +30,7 @@ func doJSON(t *testing.T, router http.Handler, method, path string, body any) *h
 			t.Fatalf("encode body: %v", err)
 		}
 	}
-	req := httptest.NewRequest(method, path, &buf)
+	req := httptest.NewRequestWithContext(t.Context(), method, path, &buf)
 	req.RemoteAddr = "203.0.113.1:12345"
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
@@ -128,6 +129,45 @@ func TestCreatePasteNegativeExpireRejected(t *testing.T) {
 	rec := doJSON(t, router, http.MethodPost, "/api/paste", createPasteRequest{Data: "x", ExpireSeconds: -1})
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400", rec.Code)
+	}
+}
+
+func TestCreatePasteExpireSecondsAtMaxAccepted(t *testing.T) {
+	router := newTestRouter(t, 1024, 100, 100)
+	rec := doJSON(t, router, http.MethodPost, "/api/paste", createPasteRequest{Data: "x", ExpireSeconds: maxExpireSeconds})
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201, body = %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestCreatePasteExpireSecondsAboveMaxRejected(t *testing.T) {
+	router := newTestRouter(t, 1024, 100, 100)
+	rec := doJSON(t, router, http.MethodPost, "/api/paste", createPasteRequest{Data: "x", ExpireSeconds: maxExpireSeconds + 1})
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", rec.Code)
+	}
+}
+
+func TestCreatePasteRejectsUnknownFields(t *testing.T) {
+	router := newTestRouter(t, 1024, 100, 100)
+	rec := doJSON(t, router, http.MethodPost, "/api/paste", map[string]any{
+		"data":       "x",
+		"unexpected": "field",
+	})
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400, body = %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestCreatePasteRejectsTrailingContent(t *testing.T) {
+	router := newTestRouter(t, 1024, 100, 100)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/paste",
+		strings.NewReader(`{"data":"x"}{"data":"y"}`))
+	req.RemoteAddr = "203.0.113.1:12345"
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400, body = %s", rec.Code, rec.Body.String())
 	}
 }
 

@@ -15,14 +15,15 @@ const OPTIONS = [
 ] as const
 
 interface ExpirationPickerProps {
+  id?: string
   value: number
   onChange: (seconds: number) => void
 }
 
-export function ExpirationPicker({ value, onChange }: ExpirationPickerProps) {
+export function ExpirationPicker({ id, value, onChange }: ExpirationPickerProps) {
   return (
     <Select value={String(value)} onValueChange={(v) => onChange(Number(v))}>
-      <SelectTrigger className="w-full">
+      <SelectTrigger id={id} className="w-full">
         <SelectValue placeholder="Expiração" />
       </SelectTrigger>
       <SelectContent>

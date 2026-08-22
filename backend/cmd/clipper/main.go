@@ -43,6 +43,7 @@ func main() {
 
 	handlers := api.NewHandlers(s, cfg.MaxPasteSizeBytes)
 	rateLimiter := api.NewRateLimiter(cfg.RateLimitRPS, cfg.RateLimitBurst, cfg.TrustProxy)
+	defer rateLimiter.Close()
 
 	mux := http.NewServeMux()
 	mux.Handle("/api/", api.NewRouter(handlers, rateLimiter))
@@ -52,6 +53,9 @@ func main() {
 		Addr:              ":" + cfg.Port,
 		Handler:           mux,
 		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       15 * time.Second,
+		WriteTimeout:      15 * time.Second,
+		IdleTimeout:       60 * time.Second,
 	}
 
 	go func() {

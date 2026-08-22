@@ -71,6 +71,7 @@ func New(ctx context.Context, cfg Config) (*Store, error) {
 func (s *Store) ensureTable(ctx context.Context) error {
 	_, err := s.client.DescribeTable(ctx, &dynamodb.DescribeTableInput{TableName: aws.String(s.table)})
 	var notFound *types.ResourceNotFoundException
+	var inUse *types.ResourceInUseException
 	switch {
 	case err == nil:
 		// table already exists
@@ -84,7 +85,11 @@ func (s *Store) ensureTable(ctx context.Context) error {
 			AttributeDefinitions: []types.AttributeDefinition{
 				{AttributeName: aws.String("id"), AttributeType: types.ScalarAttributeTypeS},
 			},
-		}); err != nil {
+		}); err != nil && !errors.As(err, &inUse) {
+			// A ResourceInUseException here means another replica racing
+			// this same startup bootstrap already created (or is creating)
+			// the table — fall through to the waiter below instead of
+			// failing. Any other error is fatal.
 			return fmt.Errorf("dynamostore: create table: %w", err)
 		}
 		waiter := dynamodb.NewTableExistsWaiter(s.client)
@@ -95,11 +100,7 @@ func (s *Store) ensureTable(ctx context.Context) error {
 		return fmt.Errorf("dynamostore: describe table: %w", err)
 	}
 
-	ttl, err := s.client.DescribeTimeToLive(ctx, &dynamodb.DescribeTimeToLiveInput{TableName: aws.String(s.table)})
-	if err != nil {
-		return fmt.Errorf("dynamostore: describe ttl: %w", err)
-	}
-	if ttl.TimeToLiveDescription != nil && ttl.TimeToLiveDescription.TimeToLiveStatus == types.TimeToLiveStatusEnabled {
+	if ttlEnabledOrEnabling(ctx, s.client, s.table) {
 		return nil
 	}
 	if _, err := s.client.UpdateTimeToLive(ctx, &dynamodb.UpdateTimeToLiveInput{
@@ -109,9 +110,30 @@ func (s *Store) ensureTable(ctx context.Context) error {
 			Enabled:       aws.Bool(true),
 		},
 	}); err != nil {
+		// Another replica racing this same startup bootstrap may have
+		// already enabled (or be enabling) TTL concurrently, which AWS
+		// rejects as a validation error even though the desired end state
+		// is reached either way. Re-check actual state before failing
+		// startup over it, rather than pattern-matching an unmodeled error.
+		if ttlEnabledOrEnabling(ctx, s.client, s.table) {
+			return nil
+		}
 		return fmt.Errorf("dynamostore: enable ttl: %w", err)
 	}
 	return nil
+}
+
+func ttlEnabledOrEnabling(ctx context.Context, client *dynamodb.Client, table string) bool {
+	ttl, err := client.DescribeTimeToLive(ctx, &dynamodb.DescribeTimeToLiveInput{TableName: aws.String(table)})
+	if err != nil || ttl.TimeToLiveDescription == nil {
+		return false
+	}
+	switch ttl.TimeToLiveDescription.TimeToLiveStatus {
+	case types.TimeToLiveStatusEnabled, types.TimeToLiveStatusEnabling:
+		return true
+	default:
+		return false
+	}
 }
 
 type item struct {
@@ -176,37 +198,50 @@ func (s *Store) Create(ctx context.Context, p paste.Paste) error {
 func (s *Store) Get(ctx context.Context, id string) (paste.Paste, error) {
 	key := map[string]types.AttributeValue{"id": &types.AttributeValueMemberS{Value: id}}
 
-	// Atomic burn: only deletes an item that is both present and marked
-	// burn-after-read, so concurrent readers can never both succeed.
-	del, err := s.client.DeleteItem(ctx, &dynamodb.DeleteItemInput{
-		TableName:           aws.String(s.table),
-		Key:                 key,
-		ConditionExpression: aws.String("burnAfterRead = :true"),
-		ExpressionAttributeValues: map[string]types.AttributeValue{
-			":true": &types.AttributeValueMemberBOOL{Value: true},
-		},
-		ReturnValues: types.ReturnValueAllOld,
-	})
+	// Cheap read first: the common case (a non-burn-after-read paste) can
+	// be served straight from this GetItem with no write at all. Its data
+	// is only trusted for that non-burn case — for a burn-after-read item
+	// it's discarded and re-fetched via the atomic conditional delete
+	// below, which is the only step allowed to decide "this was read".
+	get, err := s.client.GetItem(ctx, &dynamodb.GetItemInput{TableName: aws.String(s.table), Key: key})
+	if err != nil {
+		return paste.Paste{}, err
+	}
+	if get.Item == nil {
+		return paste.Paste{}, store.ErrNotFound
+	}
 
-	var attrs map[string]types.AttributeValue
-	var condFailed *types.ConditionalCheckFailedException
-	switch {
-	case err == nil:
-		attrs = del.Attributes
-	case errors.As(err, &condFailed):
-		// Either the paste doesn't exist, or it exists but isn't
-		// burn-after-read — a plain read distinguishes the two without
-		// deleting anything.
-		get, err := s.client.GetItem(ctx, &dynamodb.GetItemInput{TableName: aws.String(s.table), Key: key})
-		if err != nil {
+	var peek item
+	if err := attributevalue.UnmarshalMap(get.Item, &peek); err != nil {
+		return paste.Paste{}, err
+	}
+
+	attrs := get.Item
+	if peek.BurnAfterRead {
+		// Atomic burn: only deletes (and returns) an item that is both
+		// present and still marked burn-after-read at delete time, so
+		// concurrent readers can never both succeed — even though both may
+		// have seen it via the GetItem above.
+		del, err := s.client.DeleteItem(ctx, &dynamodb.DeleteItemInput{
+			TableName:           aws.String(s.table),
+			Key:                 key,
+			ConditionExpression: aws.String("burnAfterRead = :true"),
+			ExpressionAttributeValues: map[string]types.AttributeValue{
+				":true": &types.AttributeValueMemberBOOL{Value: true},
+			},
+			ReturnValues: types.ReturnValueAllOld,
+		})
+		var condFailed *types.ConditionalCheckFailedException
+		switch {
+		case err == nil:
+			attrs = del.Attributes
+		case errors.As(err, &condFailed):
+			// Another reader already burned it between our GetItem and
+			// this delete.
+			return paste.Paste{}, store.ErrNotFound
+		default:
 			return paste.Paste{}, err
 		}
-		if get.Item == nil {
-			return paste.Paste{}, store.ErrNotFound
-		}
-		attrs = get.Item
-	default:
-		return paste.Paste{}, err
 	}
 
 	var it item

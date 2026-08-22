@@ -4,6 +4,7 @@ package config
 
 import (
 	"fmt"
+	"math"
 	"os"
 	"strconv"
 )
@@ -87,8 +88,11 @@ func (c Config) validate() error {
 	if c.MaxPasteSizeBytes <= 0 {
 		return fmt.Errorf("config: MAX_PASTE_SIZE_BYTES must be positive, got %d", c.MaxPasteSizeBytes)
 	}
-	if c.RateLimitRPS <= 0 {
-		return fmt.Errorf("config: RATE_LIMIT_RPS must be positive, got %v", c.RateLimitRPS)
+	// strconv.ParseFloat accepts "NaN"/"Inf"/"+Inf"/"-Inf" without error, and
+	// NaN compares false to everything (including <= 0), so both must be
+	// checked explicitly in addition to the sign/zero check.
+	if math.IsNaN(c.RateLimitRPS) || math.IsInf(c.RateLimitRPS, 0) || c.RateLimitRPS <= 0 {
+		return fmt.Errorf("config: RATE_LIMIT_RPS must be a finite positive number, got %v", c.RateLimitRPS)
 	}
 	if c.RateLimitBurst <= 0 {
 		return fmt.Errorf("config: RATE_LIMIT_BURST must be positive, got %d", c.RateLimitBurst)

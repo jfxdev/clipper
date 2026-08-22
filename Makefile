@@ -6,7 +6,7 @@ build-frontend:
 	mkdir -p backend/internal/webembed/dist
 	cp -r frontend/dist/. backend/internal/webembed/dist/
 
-build:
+build: build-frontend
 	cd backend && go build -o clipper ./cmd/clipper
 
 test:

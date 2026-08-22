@@ -14,6 +14,16 @@ const BASE_KEY_BYTES = 32 // 256-bit random key material
 const IV_BYTES = 12 // AES-GCM standard nonce size
 const BLOB_VERSION = 1
 
+// Upper bound accepted for a blob's embedded PBKDF2 iteration count. Well
+// above our own PBKDF2_ITERATIONS (310_000) to allow raising it later, but
+// far below a count that could meaningfully freeze a browser tab. The
+// server stores Data as an opaque blob and never validates it, so anyone
+// can create a paste (via a direct API call) with an arbitrary `iter` —
+// without this cap, a victim entering any password on such a link would
+// have their browser hang computing PBKDF2 with an attacker-chosen
+// iteration count.
+const MAX_PBKDF2_ITERATIONS = 2_000_000
+
 /** The JSON shape actually stored/transmitted as Paste.Data. */
 interface EncryptedBlob {
   v: number
@@ -66,6 +76,13 @@ export async function decryptBlob(
   const parsed = JSON.parse(blob) as EncryptedBlob
   if (parsed.v !== BLOB_VERSION) {
     throw new Error("unsupported paste format version")
+  }
+  if (
+    !Number.isInteger(parsed.iter) ||
+    parsed.iter < 0 ||
+    parsed.iter > MAX_PBKDF2_ITERATIONS
+  ) {
+    throw new Error("paste has an invalid PBKDF2 iteration count")
   }
 
   const baseKeyBytes = base64UrlToBytes(keyFragment)

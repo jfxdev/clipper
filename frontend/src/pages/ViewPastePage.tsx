@@ -27,8 +27,19 @@ type Phase =
   | { kind: "needs-password"; paste: GetPasteResponse; error?: string }
   | { kind: "ready"; plaintext: string; burnAfterRead: boolean }
 
+// ViewPastePage re-keys ViewPasteInner by the route id, forcing a full
+// remount (and thus a full state reset — hashInfo, phase, any decrypted
+// plaintext) whenever the user navigates from one paste link to another
+// without a full page load. React Router reuses the same component
+// instance across param changes on the same route by default, so without
+// this a previous paste's plaintext could linger on screen while the new
+// id's data never loads.
 export function ViewPastePage() {
   const { id } = useParams<{ id: string }>()
+  return <ViewPasteInner key={id} id={id} />
+}
+
+function ViewPasteInner({ id }: { id?: string }) {
   const [hashInfo] = useState(() => parseShareHash(window.location.hash))
   const [phase, setPhase] = useState<Phase>(() => {
     if (!id || !hashInfo) return { kind: "invalid-link" }

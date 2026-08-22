@@ -52,4 +52,27 @@ describe("encryptText / decryptBlob", () => {
     expect(a.keyFragment).not.toBe(b.keyFragment)
     expect(a.blob).not.toBe(b.blob)
   })
+
+  it("rejects a blob with an oversized PBKDF2 iteration count", async () => {
+    // The server never validates the blob it stores, so a malicious paste
+    // could carry an absurd iteration count; decryptBlob must reject it
+    // before ever calling into PBKDF2, rather than freezing the tab.
+    const { blob, keyFragment } = await encryptText("secret", "some-password")
+    const parsed = JSON.parse(blob) as { iter: number; [k: string]: unknown }
+    parsed.iter = 50_000_000
+    const tamperedBlob = JSON.stringify(parsed)
+
+    await expect(decryptBlob(tamperedBlob, keyFragment, "some-password")).rejects.toThrow(
+      /iteration count/
+    )
+  })
+
+  it("rejects a blob with a non-integer PBKDF2 iteration count", async () => {
+    const { blob, keyFragment } = await encryptText("secret")
+    const parsed = JSON.parse(blob) as { iter: number; [k: string]: unknown }
+    parsed.iter = 123.45
+    const tamperedBlob = JSON.stringify(parsed)
+
+    await expect(decryptBlob(tamperedBlob, keyFragment)).rejects.toThrow(/iteration count/)
+  })
 })

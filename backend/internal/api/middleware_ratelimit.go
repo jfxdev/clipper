@@ -27,6 +27,9 @@ type RateLimiter struct {
 	rps        rate.Limit
 	burst      int
 	trustProxy bool
+
+	stop chan struct{}
+	once sync.Once
 }
 
 func NewRateLimiter(rps float64, burst int, trustProxy bool) *RateLimiter {
@@ -35,9 +38,16 @@ func NewRateLimiter(rps float64, burst int, trustProxy bool) *RateLimiter {
 		rps:        rate.Limit(rps),
 		burst:      burst,
 		trustProxy: trustProxy,
+		stop:       make(chan struct{}),
 	}
 	go rl.evictIdleLoop()
 	return rl
+}
+
+// Close stops the background idle-bucket eviction goroutine. Safe to call
+// more than once.
+func (rl *RateLimiter) Close() {
+	rl.once.Do(func() { close(rl.stop) })
 }
 
 func (rl *RateLimiter) Middleware(next http.Handler) http.Handler {
@@ -67,27 +77,36 @@ func (rl *RateLimiter) allow(ip string) bool {
 func (rl *RateLimiter) evictIdleLoop() {
 	ticker := time.NewTicker(idleBucketTTL)
 	defer ticker.Stop()
-	for range ticker.C {
-		cutoff := time.Now().Add(-idleBucketTTL)
-		rl.mu.Lock()
-		for ip, b := range rl.buckets {
-			if b.lastSeen.Before(cutoff) {
-				delete(rl.buckets, ip)
+	for {
+		select {
+		case <-rl.stop:
+			return
+		case <-ticker.C:
+			cutoff := time.Now().Add(-idleBucketTTL)
+			rl.mu.Lock()
+			for ip, b := range rl.buckets {
+				if b.lastSeen.Before(cutoff) {
+					delete(rl.buckets, ip)
+				}
 			}
+			rl.mu.Unlock()
 		}
-		rl.mu.Unlock()
 	}
 }
 
 // clientIP extracts the request's client IP. X-Forwarded-For is only
 // trusted when trustProxy is set (i.e. the app is known to sit behind a
-// reverse proxy that sets the header itself) — otherwise a client could
-// spoof the header to bypass rate limiting entirely.
+// single trusted reverse proxy that sets the header itself). Each proxy in
+// the chain *appends* to X-Forwarded-For ("client, proxy1, proxy2, ..."),
+// so the rightmost entry is the one our directly-trusted proxy actually
+// observed — the leftmost entry is client-supplied and can be spoofed to
+// any value, which would let a client rotate it to bypass rate limiting
+// entirely.
 func clientIP(r *http.Request, trustProxy bool) string {
 	if trustProxy {
 		if fwd := r.Header.Get("X-Forwarded-For"); fwd != "" {
-			first, _, _ := strings.Cut(fwd, ",")
-			return strings.TrimSpace(first)
+			parts := strings.Split(fwd, ",")
+			return strings.TrimSpace(parts[len(parts)-1])
 		}
 	}
 	host, _, err := net.SplitHostPort(r.RemoteAddr)

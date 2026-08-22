@@ -111,8 +111,12 @@ export function CreatePastePage() {
           </div>
 
           <div className="grid gap-1.5">
-            <Label>Expira em</Label>
-            <ExpirationPicker value={expireSeconds} onChange={setExpireSeconds} />
+            <Label htmlFor="paste-expiration">Expira em</Label>
+            <ExpirationPicker
+              id="paste-expiration"
+              value={expireSeconds}
+              onChange={setExpireSeconds}
+            />
           </div>
 
           <BurnAfterReadToggle checked={burnAfterRead} onChange={setBurnAfterRead} />
