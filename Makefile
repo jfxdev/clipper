@@ -32,8 +32,11 @@ test-fuzz:
 	cd backend && go test -run=XXX -fuzz=FuzzValidateID -fuzztime=30s ./internal/paste/
 	cd backend && go test -run=XXX -fuzz=FuzzValidate -fuzztime=30s ./internal/paste/
 
+# Same pinned versions the Security workflow runs, so a local check and CI
+# cannot disagree about what "clean" means.
 audit:
-	cd backend && go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+	cd backend && go run golang.org/x/vuln/cmd/govulncheck@v1.7.0 ./...
+	cd backend && go run honnef.co/go/tools/cmd/staticcheck@v0.8.1 ./...
 	cd frontend && npm audit --audit-level=high
 
 run: build

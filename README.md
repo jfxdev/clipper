@@ -96,6 +96,8 @@ collapse or be spoofable, plaintext Redis over a network).
 cd backend && go test ./...              # unit tests (no external deps)
 go test -race ./...                      # burn-after-read is a concurrency contract
 go test -tags=integration ./...          # + real redis/mongo/dynamodb-local
+
+cd ..                                    # the Make targets live at the root
 make test-fuzz                           # fuzz the ID/envelope validators
 make audit                               # govulncheck + npm audit
 

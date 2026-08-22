@@ -103,8 +103,12 @@ func TestIPv6ClientsBucketByPrefix(t *testing.T) {
 	}
 }
 
-func newForwardedRequest(remote, xff string) *http.Request {
-	req, _ := http.NewRequest(http.MethodGet, "/", nil)
+func newForwardedRequest(t *testing.T, remote, xff string) *http.Request {
+	t.Helper()
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "/", nil)
+	if err != nil {
+		t.Fatalf("http.NewRequestWithContext() error = %v", err)
+	}
 	req.RemoteAddr = remote
 	if xff != "" {
 		req.Header.Set("X-Forwarded-For", xff)
@@ -113,7 +117,7 @@ func newForwardedRequest(remote, xff string) *http.Request {
 }
 
 func TestClientIPIgnoresForwardedHeaderByDefault(t *testing.T) {
-	req := newForwardedRequest("10.0.0.1:5555", "203.0.113.9, 198.51.100.7")
+	req := newForwardedRequest(t, "10.0.0.1:5555", "203.0.113.9, 198.51.100.7")
 	if got := clientIP(req, false, nil); got != "10.0.0.1" {
 		t.Fatalf("clientIP() = %q, want %q (RemoteAddr, header ignored)", got, "10.0.0.1")
 	}
@@ -125,21 +129,21 @@ func TestClientIPIgnoresForwardedHeaderByDefault(t *testing.T) {
 func TestClientIPWithTrustedProxy(t *testing.T) {
 	trusted := []netip.Prefix{netip.MustParsePrefix("10.0.0.0/8")}
 
-	req := newForwardedRequest("10.0.0.1:5555", "203.0.113.9, 198.51.100.7, 10.0.0.2")
+	req := newForwardedRequest(t, "10.0.0.1:5555", "203.0.113.9, 198.51.100.7, 10.0.0.2")
 	if got := clientIP(req, false, trusted); got != "198.51.100.7" {
 		t.Fatalf("clientIP() = %q, want %q (first untrusted hop from the right)", got, "198.51.100.7")
 	}
 
 	// A peer outside the trusted set gets no say at all, however convincing
 	// its header looks.
-	untrusted := newForwardedRequest("203.0.113.50:5555", "1.1.1.1")
+	untrusted := newForwardedRequest(t, "203.0.113.50:5555", "1.1.1.1")
 	if got := clientIP(untrusted, false, trusted); got != "203.0.113.50" {
 		t.Fatalf("clientIP() from untrusted peer = %q, want the peer address", got)
 	}
 }
 
 func TestClientIPTrustProxyShorthand(t *testing.T) {
-	req := newForwardedRequest("10.0.0.1:5555", "203.0.113.9")
+	req := newForwardedRequest(t, "10.0.0.1:5555", "203.0.113.9")
 	if got := clientIP(req, true, nil); got != "203.0.113.9" {
 		t.Fatalf("clientIP(trustProxy=true) = %q, want %q", got, "203.0.113.9")
 	}
@@ -150,8 +154,8 @@ func TestClientIPTrustProxyShorthand(t *testing.T) {
 // same bucket every time.
 func TestClientIPSpoofedHeaderCannotRotateBuckets(t *testing.T) {
 	trusted := []netip.Prefix{netip.MustParsePrefix("10.0.0.0/8")}
-	first := clientIP(newForwardedRequest("10.0.0.1:1", "9.9.9.9, 198.51.100.7, 10.0.0.2"), false, trusted)
-	second := clientIP(newForwardedRequest("10.0.0.1:2", "8.8.8.8, 198.51.100.7, 10.0.0.2"), false, trusted)
+	first := clientIP(newForwardedRequest(t, "10.0.0.1:1", "9.9.9.9, 198.51.100.7, 10.0.0.2"), false, trusted)
+	second := clientIP(newForwardedRequest(t, "10.0.0.1:2", "8.8.8.8, 198.51.100.7, 10.0.0.2"), false, trusted)
 	if first != second {
 		t.Fatalf("spoofed left-hand entries changed the bucket: %q vs %q", first, second)
 	}

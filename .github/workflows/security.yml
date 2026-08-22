@@ -13,6 +13,12 @@ on:
 permissions:
   contents: read
 
+# Go 1.24 is out of support and its standard library carries unfixable
+# advisories, so every Go job here runs on a supported line. backend/go.mod
+# pins the same toolchain so local builds cannot drift below it.
+env:
+  GO_VERSION: "1.26"
+
 jobs:
   govulncheck:
     name: Go vulnerability scan
@@ -21,16 +27,25 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: backend/go.sum
+      # Installed rather than run through golang/govulncheck-action: the
+      # action is a third party pinned only by a moving tag, and it forces
+      # GOTOOLCHAIN=local, which breaks the moment govulncheck needs a newer
+      # toolchain than the runner has. A version-pinned `go install` is also
+      # stronger supply-chain wise — the module proxy verifies it against
+      # the public checksum database.
+      #
       # govulncheck is call-graph aware: it only reports advisories whose
       # vulnerable symbols this code actually reaches, so its findings are
-      # worth acting on rather than triaging away. The official action
-      # manages its own toolchain, which the tool needs a newer one of than
-      # this module targets.
-      - uses: golang/govulncheck-action@v1
-        with:
-          go-version-input: "1.24"
-          work-dir: backend
-          package: ./...
+      # worth acting on rather than triaging away.
+      - name: govulncheck
+        working-directory: backend
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@v1.7.0
+          govulncheck ./...
 
   staticcheck:
     name: Go static analysis
@@ -41,12 +56,12 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.24"
+          go-version: ${{ env.GO_VERSION }}
           cache-dependency-path: backend/go.sum
       - name: staticcheck
         working-directory: backend
         run: |
-          go install honnef.co/go/tools/cmd/staticcheck@2025.1.1
+          go install honnef.co/go/tools/cmd/staticcheck@v0.8.1
           staticcheck ./...
 
   gosec:
@@ -58,17 +73,13 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.24"
+          go-version: ${{ env.GO_VERSION }}
           cache-dependency-path: backend/go.sum
       - name: gosec
         working-directory: backend
         run: |
           go install github.com/securego/gosec/v2/cmd/gosec@v2.28.0
           gosec -exclude-generated ./...
-        env:
-          # gosec needs a newer toolchain than the module targets; let the
-          # go command fetch it rather than pinning the runner's Go forward.
-          GOTOOLCHAIN: auto
 
   npm-audit:
     name: npm dependency audit
@@ -100,9 +111,17 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
+      - uses: actions/setup-go@v5
+        if: matrix.language == 'go'
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: backend/go.sum
       - uses: github/codeql-action/init@v3
         with:
-          language: ${{ matrix.language }}
+          # The input is `languages` (plural). Spelled `language`, it is
+          # silently ignored and every matrix job auto-detects instead of
+          # analysing the one it was given.
+          languages: ${{ matrix.language }}
           queries: security-extended
       - uses: github/codeql-action/autobuild@v3
       - uses: github/codeql-action/analyze@v3
@@ -119,7 +138,15 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
+      # Advisory, not a gate: the action errors out entirely when the
+      # repository has Dependency graph disabled, which is a settings
+      # decision no workflow can make for itself
+      # (Settings -> Code security -> Dependency graph). Enabling it turns
+      # this into an enforcing check; until then a red X here would say
+      # nothing about the code. Vulnerable dependencies are still gated by
+      # the govulncheck and npm-audit jobs above, which do fail the build.
       - uses: actions/dependency-review-action@v4
+        continue-on-error: true
         with:
           fail-on-severity: high
 
@@ -131,21 +158,40 @@ jobs:
         with:
           persist-credentials: false
       - name: build image
-        run: docker build -t clipper:ci .
+        run: |
+          docker build -t clipper:ci .
+          # Exported as an archive so the scanners below can read the image
+          # without being handed the Docker socket — mounting that into a
+          # third-party container is root on the runner.
+          docker save clipper:ci -o "${RUNNER_TEMP}/clipper-image.tar"
+      # Trivy and Syft run from digest-pinned images rather than their
+      # marketplace actions, which are published under moving refs
+      # (trivy-action@master most of all). Same tool, same version, but the
+      # bytes that execute here cannot change under us.
+      #
       # A scratch image has almost no surface for this to find, which is the
       # point — the scan is here to catch the day someone "just adds a shell
-      # for debugging" and quietly reintroduces a distro's worth of CVEs.
+      # for debugging" and quietly reintroduces a distro's worth of CVEs,
+      # and to flag an out-of-support Go toolchain compiled into the binary.
       - name: trivy
-        uses: aquasecurity/trivy-action@master
-        with:
-          image-ref: clipper:ci
-          format: table
-          exit-code: "1"
-          severity: HIGH,CRITICAL
-          ignore-unfixed: true
+        run: |
+          docker run --rm \
+            -v "${RUNNER_TEMP}:/scan" \
+            aquasec/trivy:0.74.0@sha256:62b1e65e8869bc4b4c6aa4fa2b21595256c7c2f6018a9d9ad61caf87187c1969 \
+            image \
+              --input /scan/clipper-image.tar \
+              --format table \
+              --exit-code 1 \
+              --severity HIGH,CRITICAL \
+              --ignore-unfixed
       - name: generate SBOM
-        uses: anchore/sbom-action@v0
+        run: |
+          docker run --rm \
+            -v "${RUNNER_TEMP}:/scan" \
+            anchore/syft:v1.51.0@sha256:678bfa565b60f747aac0f8e964fe5588a24445b8d0a480e91f6efd70020dfbb0 \
+            scan docker-archive:/scan/clipper-image.tar \
+            -o spdx-json=/scan/clipper-sbom.spdx.json
+      - uses: actions/upload-artifact@v4
         with:
-          image: clipper:ci
-          format: spdx-json
-          artifact-name: clipper-sbom.spdx.json
+          name: clipper-sbom
+          path: ${{ runner.temp }}/clipper-sbom.spdx.json

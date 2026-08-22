@@ -13,7 +13,7 @@ func securedResponse(t *testing.T, cfg SecurityHeadersConfig) *httptest.Response
 		w.WriteHeader(http.StatusOK)
 	}))
 	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/paste/abc", nil))
+	h.ServeHTTP(rec, httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/paste/abc", nil))
 	return rec
 }
 
@@ -88,7 +88,7 @@ func TestRequireSameOrigin(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			req := httptest.NewRequest(http.MethodPost, "/api/paste", nil)
+			req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/paste", nil)
 			req.Host = tc.host
 			if tc.fetchSite != "" {
 				req.Header.Set("Sec-Fetch-Site", tc.fetchSite)
@@ -112,7 +112,7 @@ func TestRecoverReturns500(t *testing.T) {
 		panic("boom")
 	}))
 	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/health", nil))
+	handler.ServeHTTP(rec, httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/health", nil))
 
 	if rec.Code != http.StatusInternalServerError {
 		t.Fatalf("status = %d, want 500", rec.Code)
@@ -135,5 +135,42 @@ func TestRedactPathKeepsPasteIDsOutOfLogs(t *testing.T) {
 		if got := redactPath(path); got != want {
 			t.Errorf("redactPath(%q) = %q, want %q", path, got, want)
 		}
+	}
+}
+
+// TestSanitizeForLogStopsForgedEntries: a request path is attacker-chosen,
+// so anything logged from one must not be able to carry a newline (which
+// forges a log line) or a terminal escape, and must not be unbounded.
+func TestSanitizeForLogStopsForgedEntries(t *testing.T) {
+	forged := "/evil\n2026-01-01 INFO admin login succeeded\r\n"
+	got := sanitizeForLog(forged)
+	for _, r := range got {
+		if r < 0x20 || r == 0x7f || (r >= 0x80 && r <= 0x9f) {
+			t.Fatalf("sanitizeForLog kept control character %q in %q", r, got)
+		}
+	}
+
+	if got := sanitizeForLog("/\x1b[2J\x1b[H"); strings.ContainsRune(got, 0x1b) {
+		t.Fatalf("sanitizeForLog kept an escape character: %q", got)
+	}
+
+	long := sanitizeForLog("/" + strings.Repeat("a", 10_000))
+	if len([]rune(long)) > maxLoggedPathLen+1 {
+		t.Fatalf("sanitizeForLog returned %d runes, want the path bounded", len([]rune(long)))
+	}
+
+	// Legitimate paths, including non-ASCII ones, pass through unchanged.
+	for _, ok := range []string{"/api/health", "/paste", "/segredo-ção"} {
+		if got := sanitizeForLog(ok); got != ok {
+			t.Errorf("sanitizeForLog(%q) = %q, want it unchanged", ok, got)
+		}
+	}
+}
+
+// TestRedactPathSanitizesUnknownPaths: paths that are not a known route
+// still reach the log, so they go through the same sanitizer.
+func TestRedactPathSanitizesUnknownPaths(t *testing.T) {
+	if got := redactPath("/unknown\ninjected"); strings.ContainsRune(got, '\n') {
+		t.Fatalf("redactPath left a newline in an unknown path: %q", got)
 	}
 }

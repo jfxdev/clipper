@@ -181,6 +181,11 @@ func isNumericPort(s string) bool {
 
 // runHealthcheck performs the container health probe and returns the
 // process exit code.
+//
+// #nosec G704 -- gosec's taint analysis flags this as request forgery
+// because the port is read from the environment. The host is the literal
+// loopback address and the port is validated numeric by isNumericPort, so
+// no input can point this probe at another host.
 func runHealthcheck() int {
 	// PORT is validated rather than interpolated as-is: it is the one piece
 	// of this URL that comes from the environment, and a probe that can be
@@ -190,12 +195,18 @@ func runHealthcheck() int {
 	if !isNumericPort(port) {
 		port = "8080"
 	}
-	client := &http.Client{Timeout: 3 * time.Second}
+	// The timeout lives on the context rather than only on the client, so
+	// the deadline covers the whole probe including connection setup.
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
 	url := "http://" + net.JoinHostPort("127.0.0.1", port) + "/api/health"
-	// #nosec G704 -- the host is the literal loopback address and the only
-	// variable part, the port, is validated numeric above; there is no
-	// input that can redirect this probe at another host.
-	resp, err := client.Get(url)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "healthcheck: %v\n", err)
+		return 1
+	}
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "healthcheck: %v\n", err)
 		return 1

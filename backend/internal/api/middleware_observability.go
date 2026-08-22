@@ -76,15 +76,21 @@ func AccessLog(logger *slog.Logger, trustProxy bool, trusted []netip.Prefix) fun
 				slog.String("method", r.Method),
 				slog.String("path", redactPath(r.URL.Path)),
 				slog.Int("status", rec.status),
-				slog.String("client", clientIP(r, trustProxy, trusted)),
+				slog.String("client", sanitizeForLog(clientIP(r, trustProxy, trusted))),
 				slog.Duration("duration", time.Since(start)),
 			)
 		})
 	}
 }
 
+// maxLoggedPathLen bounds how much of an arbitrary request path reaches the
+// log. Paths are attacker-chosen and unbounded; without a cap, a few
+// requests can write megabytes into a log pipeline.
+const maxLoggedPathLen = 128
+
 // redactPath strips the paste ID out of a request path before it is
-// logged, leaving the route shape intact.
+// logged, leaving the route shape intact, and makes whatever is left safe
+// to write into a log line.
 func redactPath(path string) string {
 	const prefix = "/api/paste/"
 	if strings.HasPrefix(path, prefix) && len(path) > len(prefix) {
@@ -93,7 +99,32 @@ func redactPath(path string) string {
 	if strings.HasPrefix(path, "/paste/") && len(path) > len("/paste/") {
 		return "/paste/{id}"
 	}
-	return path
+	return sanitizeForLog(path)
+}
+
+// sanitizeForLog makes an untrusted string safe to record.
+//
+// Two problems, both from the same source. A path (or any request-derived
+// value) can carry newlines and terminal control sequences, which in a
+// line-oriented log let an attacker forge entries that look like they came
+// from the server — CWE-117. And it can be arbitrarily long, which turns a
+// handful of requests into a flooded log. The JSON handler already escapes
+// control characters, so forged *lines* are not reachable today; this makes
+// the property hold regardless of which handler is installed, and bounds
+// the size either way.
+func sanitizeForLog(value string) string {
+	if len(value) > maxLoggedPathLen {
+		value = value[:maxLoggedPathLen] + "…"
+	}
+	return strings.Map(func(r rune) rune {
+		// Drop C0 controls, DEL, and the C1 range that terminals and log
+		// viewers act on. Unicode graphics are kept: mangling them would
+		// make legitimate paths unreadable without adding safety.
+		if r < 0x20 || r == 0x7f || (r >= 0x80 && r <= 0x9f) {
+			return -1
+		}
+		return r
+	}, value)
 }
 
 // Recover turns a panic in any handler into a 500 instead of a killed

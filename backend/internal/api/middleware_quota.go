@@ -10,6 +10,14 @@ import (
 // quotaWindow is the rolling period a client's storage allowance covers.
 const quotaWindow = 24 * time.Hour
 
+// evictionSampleSize is how many tracked clients are examined when the map
+// is full and room has to be made. Scanning the whole map would turn every
+// request past the cap into an O(maxClients) walk under the lock — a
+// cheaper denial of service than the one the cap exists to prevent. Taking
+// the oldest of a small sample (Go randomizes map iteration order) is the
+// same approximate-LRU trade-off Redis makes, at constant cost.
+const evictionSampleSize = 8
+
 // QuotaConfig configures NewQuota.
 type QuotaConfig struct {
 	// MaxPastes and MaxBytes are what one client may store per window.
@@ -85,10 +93,15 @@ func (q *Quota) charge(key string, size int64, now time.Time) bool {
 	u, ok := q.usage[key]
 	if !ok {
 		if len(q.usage) >= q.maxClients {
-			// The map is full of other clients' counters. Refusing here is
-			// the conservative choice: the alternative is letting the cap
-			// be bypassed by whoever arrives once the map fills up.
-			return false
+			// Make room rather than refuse. Refusing every untracked client
+			// once the map fills would let an attacker rotating source
+			// addresses lock the whole service out of paste creation for a
+			// full quota window — turning an accounting cap into a global
+			// outage. Evicting instead degrades accuracy (an attacker who
+			// can fill the map can also cycle their own counter out of it)
+			// while keeping the service available; the rate limiters are
+			// what bound that attacker's throughput.
+			q.evictOldestSample(now)
 		}
 		u = &usage{windowStart: now}
 		q.usage[key] = u
@@ -102,6 +115,63 @@ func (q *Quota) charge(key string, size int64, now time.Time) bool {
 	u.pastes++
 	u.bytes += size
 	return true
+}
+
+// Refund returns a previously charged allowance to the request's client.
+// It is called when the work the charge paid for did not happen — a failed
+// datastore write, say — so an outage does not quietly consume the
+// allowance of every client that hit it.
+func (q *Quota) Refund(r *http.Request, size int64) {
+	q.refund(clientIP(r, q.trustProxy, q.trustedProxies), size, time.Now())
+}
+
+func (q *Quota) refund(key string, size int64, now time.Time) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
+	u, ok := q.usage[key]
+	if !ok {
+		return
+	}
+	// If the window rolled over between the charge and the refund, the
+	// counters no longer include this charge and must not go negative.
+	if now.Sub(u.windowStart) >= quotaWindow {
+		return
+	}
+	if u.pastes > 0 {
+		u.pastes--
+	}
+	u.bytes -= size
+	if u.bytes < 0 {
+		u.bytes = 0
+	}
+}
+
+// evictOldestSample removes the least recently started window among a small
+// random sample of tracked clients. The caller must hold q.mu.
+func (q *Quota) evictOldestSample(now time.Time) {
+	var (
+		oldestKey string
+		oldest    time.Time
+		seen      int
+	)
+	for key, u := range q.usage {
+		// An entry whose window has already rolled over is dead weight;
+		// take it immediately rather than sampling further.
+		if now.Sub(u.windowStart) >= quotaWindow {
+			delete(q.usage, key)
+			return
+		}
+		if oldestKey == "" || u.windowStart.Before(oldest) {
+			oldestKey, oldest = key, u.windowStart
+		}
+		if seen++; seen >= evictionSampleSize {
+			break
+		}
+	}
+	if oldestKey != "" {
+		delete(q.usage, oldestKey)
+	}
 }
 
 func (q *Quota) evictLoop() {

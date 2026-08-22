@@ -91,14 +91,20 @@ func (h *Handlers) CreatePaste(w http.ResponseWriter, r *http.Request) {
 
 	// Charged only after validation, so malformed requests can't burn a
 	// client's allowance, and before the write, so the allowance actually
-	// bounds what reaches storage.
-	if h.cfg.Quota != nil && !h.cfg.Quota.Charge(r, int64(len(req.Data))) {
+	// bounds what reaches storage. A failed write refunds it below —
+	// otherwise a datastore outage would silently spend the allowance of
+	// every client that hit it, and keep denying them after it recovered.
+	size := int64(len(req.Data))
+	if h.cfg.Quota != nil && !h.cfg.Quota.Charge(r, size) {
 		writeError(w, ErrQuotaExceeded)
 		return
 	}
 
 	id, err := paste.NewID()
 	if err != nil {
+		if h.cfg.Quota != nil {
+			h.cfg.Quota.Refund(r, size)
+		}
 		writeError(w, err)
 		return
 	}
@@ -116,6 +122,9 @@ func (h *Handlers) CreatePaste(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.store.Create(r.Context(), p); err != nil {
+		if h.cfg.Quota != nil {
+			h.cfg.Quota.Refund(r, size)
+		}
 		writeError(w, err)
 		return
 	}

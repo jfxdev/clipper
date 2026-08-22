@@ -14,8 +14,8 @@ func NewRouter(h *Handlers, rl *RateLimiter) http.Handler {
 	// Anything else under /api/ is a 404 in JSON rather than falling
 	// through to the SPA's index.html, which would answer an API probe with
 	// a 200 and an HTML body.
-	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) {
+	mux.Handle("/api/", rl.Middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, errorResponse{Error: "not found"})
-	})
+	})))
 	return mux
 }

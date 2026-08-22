@@ -2,6 +2,14 @@ module github.com/jfxdev/clipper/backend
 
 go 1.24
 
+// Go 1.24 stopped receiving security fixes, so binaries built with it carry
+// unfixable standard-library vulnerabilities (net/url and crypto/tls denial
+// of service, among others) that the container scan flags. The `go` line
+// above stays at the language version this code actually needs; this line
+// makes every build — local, CI and image — use a toolchain that is still
+// supported.
+toolchain go1.26.7
+
 require (
 	github.com/aws/aws-sdk-go-v2 v1.43.7
 	github.com/aws/aws-sdk-go-v2/config v1.32.38

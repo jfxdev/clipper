@@ -1,5 +1,10 @@
 # Local development stack for the integration test suite.
 #
+# Images are pinned by digest for the same reason the Dockerfile pins its
+# bases: a tag is mutable, so what `docker compose up` pulls tomorrow is not
+# necessarily what was reviewed today. Dependabot's docker ecosystem keeps
+# these current.
+#
 # Every datastore here is bound to 127.0.0.1 rather than 0.0.0.0. Published
 # on all interfaces — the Docker default — a Redis or MongoDB with no
 # authentication is reachable by anyone who can route to the host, and both
@@ -8,7 +13,7 @@
 # quietly expose an open database.
 services:
   redis:
-    image: redis:7-alpine
+    image: redis:7-alpine@sha256:ff02b58f971e7d7d156a1267e283fcbbeee91773b6aa36c49dac28ecfe28eadf
     command:
       - redis-server
       - --requirepass
@@ -23,7 +28,7 @@ services:
       - no-new-privileges:true
 
   mongo:
-    image: mongo:7
+    image: mongo:7@sha256:b6421fd6d1c5ded6377b397d8983e2f82e2100dc5123332dcfda2065a472be5b
     environment:
       MONGO_INITDB_ROOT_USERNAME: ${MONGO_USERNAME:-clipper}
       MONGO_INITDB_ROOT_PASSWORD: ${MONGO_PASSWORD:-devpassword}
@@ -33,7 +38,7 @@ services:
       - no-new-privileges:true
 
   dynamodb-local:
-    image: amazon/dynamodb-local:latest
+    image: amazon/dynamodb-local:latest@sha256:ff89bd48ff32cd8d9be5fee8873b65b8854dc408f1afe881be6eb00247bc0dab
     ports:
       - "127.0.0.1:8000:8000"
     command: ["-jar", "DynamoDBLocal.jar", "-inMemory", "-sharedDb"]

@@ -51,7 +51,10 @@ func writeJSON(w http.ResponseWriter, status int, body any) {
 func writeError(w http.ResponseWriter, err error) {
 	status, msg := classify(err)
 	if status == http.StatusInternalServerError {
-		errorLogger.Error("api: internal error", slog.Any("error", err))
+		// The error text can carry request-derived fragments (a decoder
+		// message quoting a field, a datastore driver echoing a key), so it
+		// is sanitized and bounded like any other untrusted log field.
+		errorLogger.Error("api: internal error", slog.String("error", sanitizeForLog(err.Error())))
 		msg = "internal server error"
 	}
 	writeJSON(w, status, errorResponse{Error: msg})

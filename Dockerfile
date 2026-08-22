@@ -11,7 +11,11 @@ RUN npm ci
 COPY frontend/ ./
 RUN npm run build
 
-FROM golang:1.24-alpine@sha256:8bee1901f1e530bfb4a7850aa7a479d17ae3a18beb6e09064ed54cfd245b7191 AS backend-build
+# Go 1.24 is out of support, so its standard library keeps advisories that
+# will never be fixed on that line and end up compiled into the binary. The
+# builder tracks a supported release; backend/go.mod pins the same toolchain
+# so a local `make build` cannot produce a weaker binary than the image.
+FROM golang:1.26-alpine@sha256:28d89ee9cc0ff9fec75c82ca201e6bf7fdf9a679d4b7b24dfa04f2bb766bb468 AS backend-build
 WORKDIR /src/backend
 COPY backend/go.mod backend/go.sum ./
 RUN go mod download
