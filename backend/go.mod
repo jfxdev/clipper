@@ -1,13 +1,12 @@
 module github.com/jfxdev/clipper/backend
 
-go 1.24
+go 1.25.0
 
 // Go 1.24 stopped receiving security fixes, so binaries built with it carry
 // unfixable standard-library vulnerabilities (net/url and crypto/tls denial
-// of service, among others) that the container scan flags. The `go` line
-// above stays at the language version this code actually needs; this line
-// makes every build — local, CI and image — use a toolchain that is still
-// supported.
+// of service, among others) that the container scan flags. This line makes
+// every build — local, CI and image — use a toolchain that is still
+// supported, rather than whatever the developer happens to have installed.
 toolchain go1.26.7
 
 require (
@@ -42,8 +41,8 @@ require (
 	github.com/xdg-go/stringprep v1.0.4 // indirect
 	github.com/youmark/pkcs8 v0.0.0-20240726163527-a2c0da244d78 // indirect
 	go.uber.org/atomic v1.11.0 // indirect
-	golang.org/x/crypto v0.33.0 // indirect
-	golang.org/x/sync v0.11.0 // indirect
-	golang.org/x/sys v0.30.0 // indirect
-	golang.org/x/text v0.22.0 // indirect
+	golang.org/x/crypto v0.55.0 // indirect
+	golang.org/x/sync v0.22.0 // indirect
+	golang.org/x/sys v0.47.0 // indirect
+	golang.org/x/text v0.41.0 // indirect
 )

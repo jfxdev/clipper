@@ -116,10 +116,17 @@ func sanitizeForLog(value string) string {
 	if len(value) > maxLoggedPathLen {
 		value = value[:maxLoggedPathLen] + "…"
 	}
+	// Line terminators first and explicitly: they are the characters that
+	// actually forge a log entry, and spelling them out keeps the intent
+	// obvious to a reader (and to static analysis) rather than hiding it
+	// inside the rune predicate below.
+	value = strings.ReplaceAll(value, "\r", "")
+	value = strings.ReplaceAll(value, "\n", "")
 	return strings.Map(func(r rune) rune {
-		// Drop C0 controls, DEL, and the C1 range that terminals and log
-		// viewers act on. Unicode graphics are kept: mangling them would
-		// make legitimate paths unreadable without adding safety.
+		// Then the rest of the characters a terminal or log viewer acts on:
+		// remaining C0 controls, DEL, and the C1 range. Unicode graphics
+		// are kept — mangling them would make legitimate paths unreadable
+		// without adding any safety.
 		if r < 0x20 || r == 0x7f || (r >= 0x80 && r <= 0x9f) {
 			return -1
 		}
