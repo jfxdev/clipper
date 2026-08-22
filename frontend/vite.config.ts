@@ -27,7 +27,15 @@ export default defineConfig({
     // localhost:5173 makes the backend's RequireSameOrigin check see the
     // request as same-origin instead of rejecting it as cross-site.
     proxy: {
-      "/api": "http://localhost:8080",
+      // The string-shorthand form (`"/api": "http://..."`) sets
+      // changeOrigin: true implicitly, which rewrites the Host header to
+      // the target and makes the backend's RequireSameOrigin check see a
+      // cross-site request and reject it. The object form is needed to
+      // pin changeOrigin: false and keep Host as localhost:5173.
+      "/api": {
+        target: "http://localhost:8080",
+        changeOrigin: false,
+      },
     },
   },
 })
