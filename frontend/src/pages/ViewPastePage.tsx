@@ -32,8 +32,31 @@ function clearKeyFragment() {
   }
 }
 
+// clearKeyFragment strips the key from the address bar once a paste is
+// decrypted, so a reload of that same tab arrives with no hash — otherwise
+// indistinguishable from a link that was never valid. Recording the id here
+// lets that reload say "you already read this" instead of "broken link".
+const VIEWED_PREFIX = "clipper:viewed:"
+
+function markViewed(id: string) {
+  try {
+    sessionStorage.setItem(VIEWED_PREFIX + id, "1")
+  } catch {
+    // Private-browsing modes can disallow sessionStorage; the reload then
+    // just falls back to the generic "incomplete link" message.
+  }
+}
+
+function wasViewed(id: string): boolean {
+  try {
+    return sessionStorage.getItem(VIEWED_PREFIX + id) === "1"
+  } catch {
+    return false
+  }
+}
+
 type Phase =
-  | { kind: "invalid-link" }
+  | { kind: "invalid-link"; alreadyViewed: boolean }
   | { kind: "awaiting-burn-confirm" }
   | { kind: "cancelled" }
   | { kind: "loading" }
@@ -56,7 +79,9 @@ export function ViewPastePage() {
 function ViewPasteInner({ id }: { id?: string }) {
   const [hashInfo] = useState(() => parseShareHash(window.location.hash))
   const [phase, setPhase] = useState<Phase>(() => {
-    if (!id || !hashInfo) return { kind: "invalid-link" }
+    if (!id || !hashInfo) {
+      return { kind: "invalid-link", alreadyViewed: !!id && wasViewed(id) }
+    }
     return hashInfo.isBurnHint ? { kind: "awaiting-burn-confirm" } : { kind: "loading" }
   })
 
@@ -75,6 +100,7 @@ function ViewPasteInner({ id }: { id?: string }) {
       }
       const plaintext = await decryptBlob(paste.data, hashInfo.keyFragment, password)
       clearKeyFragment()
+      markViewed(id)
       setPhase({ kind: "ready", plaintext, burnAfterRead: paste.burnAfterRead })
     } catch (err) {
       setPhase({
@@ -99,10 +125,11 @@ function ViewPasteInner({ id }: { id?: string }) {
   }, [])
 
   async function handlePasswordSubmit(paste: GetPasteResponse, password: string) {
-    if (!hashInfo) return
+    if (!hashInfo || !id) return
     try {
       const plaintext = await decryptBlob(paste.data, hashInfo.keyFragment, password)
       clearKeyFragment()
+      markViewed(id)
       setPhase({ kind: "ready", plaintext, burnAfterRead: paste.burnAfterRead })
     } catch {
       setPhase({ kind: "needs-password", paste, error: "Senha incorreta. Tente novamente." })
@@ -110,7 +137,9 @@ function ViewPasteInner({ id }: { id?: string }) {
   }
 
   if (phase.kind === "invalid-link") {
-    return (
+    return phase.alreadyViewed ? (
+      <ErrorCard message="Você já abriu esta mensagem nesta aba. Por segurança, a chave de decriptação some da URL assim que o link é usado, então atualizar a página não mostra o conteúdo de novo — abra o link original novamente se ainda precisar dele." />
+    ) : (
       <ErrorCard message='Este link está incompleto: falta a chave de decriptação (o trecho depois de "#").' />
     )
   }
