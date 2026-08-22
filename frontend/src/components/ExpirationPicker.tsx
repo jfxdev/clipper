@@ -6,12 +6,15 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 
+// Every option is a real expiry: a secret that never expires outlives the
+// reason it was shared, and the server rejects "never" outright. The
+// longest option matches the backend's default MAX_EXPIRE_SECONDS.
 const OPTIONS = [
   { seconds: 600, label: "10 minutos" },
   { seconds: 3600, label: "1 hora" },
   { seconds: 86400, label: "1 dia" },
   { seconds: 604800, label: "1 semana" },
-  { seconds: 0, label: "Nunca" },
+  { seconds: 2592000, label: "30 dias" },
 ] as const
 
 interface ExpirationPickerProps {

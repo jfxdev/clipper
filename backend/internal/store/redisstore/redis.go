@@ -5,7 +5,9 @@ package redisstore
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
+	"net"
 	"strconv"
 	"time"
 
@@ -23,6 +25,11 @@ type Config struct {
 	Addr     string
 	Password string
 	DB       int
+	// TLS enables an encrypted connection to Redis. Certificate
+	// verification always stays on: a store that holds ciphertext plus
+	// expiry metadata is worth protecting from an on-path attacker, and a
+	// "skip verify" escape hatch would quietly undo that.
+	TLS bool
 }
 
 type Store struct {
@@ -30,13 +37,19 @@ type Store struct {
 }
 
 func New(cfg Config) *Store {
-	return &Store{
-		client: redis.NewClient(&redis.Options{
-			Addr:     cfg.Addr,
-			Password: cfg.Password,
-			DB:       cfg.DB,
-		}),
+	opts := &redis.Options{
+		Addr:     cfg.Addr,
+		Password: cfg.Password,
+		DB:       cfg.DB,
 	}
+	if cfg.TLS {
+		host, _, err := net.SplitHostPort(cfg.Addr)
+		if err != nil {
+			host = cfg.Addr
+		}
+		opts.TLSConfig = &tls.Config{ServerName: host, MinVersion: tls.VersionTLS12}
+	}
+	return &Store{client: redis.NewClient(opts)}
 }
 
 func (s *Store) Create(ctx context.Context, p paste.Paste) error {
@@ -44,6 +57,7 @@ func (s *Store) Create(ctx context.Context, p paste.Paste) error {
 	fields := map[string]any{
 		"id":                p.ID,
 		"data":              p.Data,
+		"readToken":         p.ReadToken,
 		"burnAfterRead":     boolToStr(p.BurnAfterRead),
 		"passwordProtected": boolToStr(p.PasswordProtected),
 		"createdAt":         p.CreatedAt.UTC().Format(time.RFC3339Nano),
@@ -66,13 +80,28 @@ func (s *Store) Create(ctx context.Context, p paste.Paste) error {
 	return err
 }
 
-// getAndMaybeBurn atomically reads the paste hash and, if it is marked
-// burn-after-read, deletes it — all within a single Lua script execution so
-// concurrent readers can never both see the paste.
+// getAndMaybeBurn atomically verifies the caller's read token and, if the
+// paste is marked burn-after-read, deletes it — all within a single Lua
+// script execution so concurrent readers can never both see the paste and a
+// wrong token can never trigger the delete.
+//
+// The token comparison here is Lua's ordinary string equality rather than a
+// constant-time one. The token is a 256-bit hash, so a timing oracle would
+// have to resolve sub-nanosecond differences across a network round trip to
+// be of any use; the comparisons that happen in Go (memory store, quota
+// checks) do use crypto/subtle.
 const getAndMaybeBurnScript = `
 local key = KEYS[1]
+local token = ARGV[1]
 local vals = redis.call('HGETALL', key)
 if #vals == 0 then
+  return nil
+end
+local stored = redis.call('HGET', key, 'readToken')
+if stored == false then
+  stored = ''
+end
+if stored ~= token then
   return nil
 end
 local burn = redis.call('HGET', key, 'burnAfterRead')
@@ -82,9 +111,9 @@ end
 return vals
 `
 
-func (s *Store) Get(ctx context.Context, id string) (paste.Paste, error) {
+func (s *Store) Get(ctx context.Context, id, readToken string) (paste.Paste, error) {
 	k := key(id)
-	res, err := s.client.Eval(ctx, getAndMaybeBurnScript, []string{k}).Result()
+	res, err := s.client.Eval(ctx, getAndMaybeBurnScript, []string{k}, readToken).Result()
 	if errors.Is(err, redis.Nil) {
 		return paste.Paste{}, store.ErrNotFound
 	}
@@ -127,6 +156,7 @@ func fromFields(f map[string]string) (paste.Paste, error) {
 	p := paste.Paste{
 		ID:                f["id"],
 		Data:              f["data"],
+		ReadToken:         f["readToken"],
 		BurnAfterRead:     f["burnAfterRead"] == "1",
 		PasswordProtected: f["passwordProtected"] == "1",
 	}

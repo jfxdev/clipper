@@ -5,6 +5,7 @@ on:
     branches: ["**"]
   pull_request:
 
+# Least privilege by default; jobs that need more request it explicitly.
 permissions:
   contents: read
 
@@ -22,9 +23,16 @@ jobs:
       - name: go vet
         working-directory: backend
         run: go vet ./...
-      - name: go test
+      # -race is not optional here: the burn-after-read contract is a
+      # concurrency guarantee ("two readers can never both succeed"), and a
+      # data race in the store or limiter is exactly the kind of bug that
+      # only shows up under load in production.
+      - name: go test (race)
         working-directory: backend
-        run: go test ./...
+        run: go test -race ./...
+      - name: go build (integration tags)
+        working-directory: backend
+        run: go vet -tags=integration ./...
 
   frontend:
     runs-on: ubuntu-latest
@@ -40,6 +48,9 @@ jobs:
       - name: install
         working-directory: frontend
         run: npm ci
+      - name: lint
+        working-directory: frontend
+        run: npm run lint
       - name: test
         working-directory: frontend
         run: npm test -- --run
@@ -62,3 +73,11 @@ jobs:
           node-version: "22"
       - name: build
         run: make build
+      # The scratch runtime image only works because this binary has no
+      # dynamic dependencies. Asserting it here means a stray cgo import
+      # fails CI instead of producing an image that cannot start.
+      - name: assert the binary is static
+        run: |
+          file backend/clipper
+          file backend/clipper | grep -q "statically linked"
+          ! ldd backend/clipper 2>/dev/null

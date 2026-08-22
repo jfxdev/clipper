@@ -4,6 +4,12 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- The paste ID in the path identifies a specific secret, so no
+         referrer should ever leave this page. The header set by the server
+         is the real control; this is the copy that survives the page being
+         saved or served from somewhere else. -->
+    <meta name="referrer" content="no-referrer" />
+    <meta name="robots" content="noindex, nofollow, noarchive" />
     <title>clipper</title>
   </head>
   <body>

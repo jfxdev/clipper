@@ -5,8 +5,10 @@ package config
 import (
 	"fmt"
 	"math"
+	"net/netip"
 	"os"
 	"strconv"
+	"strings"
 )
 
 type Config struct {
@@ -19,6 +21,7 @@ type Config struct {
 	RedisAddr     string
 	RedisPassword string
 	RedisDB       int
+	RedisTLS      bool
 
 	MongoURI        string
 	MongoDatabase   string
@@ -28,15 +31,43 @@ type Config struct {
 	DynamoEndpoint string // optional, for dynamodb-local
 	DynamoRegion   string
 
-	RateLimitRPS   float64
-	RateLimitBurst int
+	// RateLimitRPS/Burst is the per-client token bucket. GlobalRateLimit*
+	// is a second bucket shared by every client, so a distributed flood
+	// from many source addresses still hits a ceiling.
+	RateLimitRPS         float64
+	RateLimitBurst       int
+	GlobalRateLimitRPS   float64
+	GlobalRateLimitBurst int
+
+	// RateLimitMaxClients caps how many per-client buckets are held at
+	// once. Without it, an attacker walking an IPv6 prefix can allocate
+	// buckets faster than the idle sweep reclaims them.
+	RateLimitMaxClients int
+
+	// QuotaPastesPerDay/QuotaBytesPerDay bound how much storage a single
+	// client can consume in a rolling 24h window, which the request-rate
+	// limiter alone does not: 5 rps sustained for a day is a lot of 2MB
+	// pastes.
+	QuotaPastesPerDay int
+	QuotaBytesPerDay  int64
 
 	MaxPasteSizeBytes int64
 
-	// TrustProxy controls whether the X-Forwarded-For header is used to
-	// determine the client IP for rate limiting. Only enable this behind a
-	// trusted reverse proxy that sets the header itself.
-	TrustProxy bool
+	// MaxExpireSeconds caps requested lifetimes. Pastes must expire: a
+	// secret with no expiry is a liability that outlives whatever made it
+	// worth sharing.
+	MaxExpireSeconds int64
+
+	// TrustProxy trusts the X-Forwarded-For header from any direct peer.
+	// TrustedProxies is the safer form: X-Forwarded-For is only consulted
+	// when the direct peer's address falls inside one of these prefixes.
+	TrustProxy     bool
+	TrustedProxies []netip.Prefix
+
+	// HSTSMaxAgeSeconds emits Strict-Transport-Security when > 0. Left off
+	// by default because the binary itself speaks plain HTTP; turn it on
+	// when a TLS terminator sits in front.
+	HSTSMaxAgeSeconds int
 }
 
 func Load() (Config, error) {
@@ -58,18 +89,43 @@ func Load() (Config, error) {
 	if cfg.RedisDB, err = getEnvInt("REDIS_DB", 0); err != nil {
 		return Config{}, err
 	}
+	if cfg.RedisTLS, err = getEnvBool("REDIS_TLS", false); err != nil {
+		return Config{}, err
+	}
 	if cfg.RateLimitRPS, err = getEnvFloat("RATE_LIMIT_RPS", 5); err != nil {
 		return Config{}, err
 	}
 	if cfg.RateLimitBurst, err = getEnvInt("RATE_LIMIT_BURST", 10); err != nil {
 		return Config{}, err
 	}
-	maxSize, err := getEnvInt64("MAX_PASTE_SIZE_BYTES", cfg.MaxPasteSizeBytes)
-	if err != nil {
+	if cfg.GlobalRateLimitRPS, err = getEnvFloat("GLOBAL_RATE_LIMIT_RPS", 200); err != nil {
 		return Config{}, err
 	}
-	cfg.MaxPasteSizeBytes = maxSize
+	if cfg.GlobalRateLimitBurst, err = getEnvInt("GLOBAL_RATE_LIMIT_BURST", 400); err != nil {
+		return Config{}, err
+	}
+	if cfg.RateLimitMaxClients, err = getEnvInt("RATE_LIMIT_MAX_CLIENTS", 100_000); err != nil {
+		return Config{}, err
+	}
+	if cfg.QuotaPastesPerDay, err = getEnvInt("QUOTA_PASTES_PER_DAY", 200); err != nil {
+		return Config{}, err
+	}
+	if cfg.QuotaBytesPerDay, err = getEnvInt64("QUOTA_BYTES_PER_DAY", 64*1024*1024); err != nil {
+		return Config{}, err
+	}
+	if cfg.MaxPasteSizeBytes, err = getEnvInt64("MAX_PASTE_SIZE_BYTES", cfg.MaxPasteSizeBytes); err != nil {
+		return Config{}, err
+	}
+	if cfg.MaxExpireSeconds, err = getEnvInt64("MAX_EXPIRE_SECONDS", 30*24*60*60); err != nil {
+		return Config{}, err
+	}
+	if cfg.HSTSMaxAgeSeconds, err = getEnvInt("HSTS_MAX_AGE_SECONDS", 0); err != nil {
+		return Config{}, err
+	}
 	if cfg.TrustProxy, err = getEnvBool("TRUST_PROXY", false); err != nil {
+		return Config{}, err
+	}
+	if cfg.TrustedProxies, err = getEnvPrefixes("TRUSTED_PROXIES"); err != nil {
 		return Config{}, err
 	}
 
@@ -78,6 +134,11 @@ func Load() (Config, error) {
 	}
 	return cfg, nil
 }
+
+// maxExpireCeiling is the highest MAX_EXPIRE_SECONDS accepted: one year,
+// comfortably under the ~9.223e9-second threshold at which
+// time.Duration(seconds) * time.Second would overflow int64 nanoseconds.
+const maxExpireCeiling int64 = 365 * 24 * 60 * 60
 
 func (c Config) validate() error {
 	switch c.StoreBackend {
@@ -88,16 +149,67 @@ func (c Config) validate() error {
 	if c.MaxPasteSizeBytes <= 0 {
 		return fmt.Errorf("config: MAX_PASTE_SIZE_BYTES must be positive, got %d", c.MaxPasteSizeBytes)
 	}
+	if c.MaxExpireSeconds <= 0 || c.MaxExpireSeconds > maxExpireCeiling {
+		return fmt.Errorf("config: MAX_EXPIRE_SECONDS must be in (0, %d], got %d", maxExpireCeiling, c.MaxExpireSeconds)
+	}
 	// strconv.ParseFloat accepts "NaN"/"Inf"/"+Inf"/"-Inf" without error, and
 	// NaN compares false to everything (including <= 0), so both must be
 	// checked explicitly in addition to the sign/zero check.
-	if math.IsNaN(c.RateLimitRPS) || math.IsInf(c.RateLimitRPS, 0) || c.RateLimitRPS <= 0 {
-		return fmt.Errorf("config: RATE_LIMIT_RPS must be a finite positive number, got %v", c.RateLimitRPS)
+	if err := validateRate("RATE_LIMIT_RPS", c.RateLimitRPS); err != nil {
+		return err
+	}
+	if err := validateRate("GLOBAL_RATE_LIMIT_RPS", c.GlobalRateLimitRPS); err != nil {
+		return err
 	}
 	if c.RateLimitBurst <= 0 {
 		return fmt.Errorf("config: RATE_LIMIT_BURST must be positive, got %d", c.RateLimitBurst)
 	}
+	if c.GlobalRateLimitBurst <= 0 {
+		return fmt.Errorf("config: GLOBAL_RATE_LIMIT_BURST must be positive, got %d", c.GlobalRateLimitBurst)
+	}
+	if c.RateLimitMaxClients <= 0 {
+		return fmt.Errorf("config: RATE_LIMIT_MAX_CLIENTS must be positive, got %d", c.RateLimitMaxClients)
+	}
+	if c.QuotaPastesPerDay <= 0 {
+		return fmt.Errorf("config: QUOTA_PASTES_PER_DAY must be positive, got %d", c.QuotaPastesPerDay)
+	}
+	if c.QuotaBytesPerDay <= 0 {
+		return fmt.Errorf("config: QUOTA_BYTES_PER_DAY must be positive, got %d", c.QuotaBytesPerDay)
+	}
+	if c.HSTSMaxAgeSeconds < 0 {
+		return fmt.Errorf("config: HSTS_MAX_AGE_SECONDS must not be negative, got %d", c.HSTSMaxAgeSeconds)
+	}
 	return nil
+}
+
+func validateRate(name string, rps float64) error {
+	if math.IsNaN(rps) || math.IsInf(rps, 0) || rps <= 0 {
+		return fmt.Errorf("config: %s must be a finite positive number, got %v", name, rps)
+	}
+	return nil
+}
+
+// Warnings lists configuration that is valid but risky to run in
+// production, so main can log it loudly at startup instead of letting it
+// pass silently.
+func (c Config) Warnings() []string {
+	var w []string
+	if c.StoreBackend == "memory" {
+		w = append(w, "STORE_BACKEND=memory keeps every paste in process memory: data is lost on restart and not shared between replicas. Use redis, mongo, or dynamo in production.")
+	}
+	if c.TrustProxy && len(c.TrustedProxies) == 0 {
+		w = append(w, "TRUST_PROXY=true accepts X-Forwarded-For from any direct peer. If the process is reachable without going through your reverse proxy, clients can spoof their address and bypass rate limiting. Prefer TRUSTED_PROXIES with your proxy's CIDR.")
+	}
+	if !c.TrustProxy && len(c.TrustedProxies) == 0 {
+		w = append(w, "X-Forwarded-For is ignored (no TRUSTED_PROXIES set). Behind a reverse proxy this collapses every client into one rate-limit bucket; set TRUSTED_PROXIES to your proxy's CIDR.")
+	}
+	if c.RedisTLS || c.StoreBackend != "redis" {
+		return w
+	}
+	if !strings.HasPrefix(c.RedisAddr, "localhost:") && !strings.HasPrefix(c.RedisAddr, "127.0.0.1:") {
+		w = append(w, "REDIS_TLS is off for a non-local REDIS_ADDR: paste ciphertext and metadata cross the network in plaintext.")
+	}
+	return w
 }
 
 func getEnv(key, def string) string {
@@ -153,4 +265,31 @@ func getEnvBool(key string, def bool) (bool, error) {
 		return false, fmt.Errorf("config: invalid %s: %w", key, err)
 	}
 	return b, nil
+}
+
+// getEnvPrefixes parses a comma-separated list of CIDR prefixes. A bare
+// address is accepted and treated as a single-host prefix, since that is
+// how people usually write "my one proxy".
+func getEnvPrefixes(key string) ([]netip.Prefix, error) {
+	v, ok := os.LookupEnv(key)
+	if !ok || strings.TrimSpace(v) == "" {
+		return nil, nil
+	}
+	var out []netip.Prefix
+	for _, part := range strings.Split(v, ",") {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		if prefix, err := netip.ParsePrefix(part); err == nil {
+			out = append(out, prefix.Masked())
+			continue
+		}
+		addr, err := netip.ParseAddr(part)
+		if err != nil {
+			return nil, fmt.Errorf("config: invalid %s entry %q: not a CIDR prefix or IP address", key, part)
+		}
+		out = append(out, netip.PrefixFrom(addr, addr.BitLen()))
+	}
+	return out, nil
 }

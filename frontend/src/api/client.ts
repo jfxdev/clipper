@@ -6,6 +6,8 @@ export interface CreatePasteRequest {
   expireSeconds: number
   burnAfterRead: boolean
   passwordProtected: boolean
+  /** base64url(SHA-256(key fragment)); required on every later read. */
+  readToken: string
 }
 
 export interface CreatePasteResponse {
@@ -18,6 +20,11 @@ export interface GetPasteResponse {
   passwordProtected: boolean
   createdAt: string
 }
+
+// Carrying the read token in a header rather than the query string keeps it
+// out of proxy access logs, and makes the request non-simple so a
+// cross-origin read is stopped at the browser's preflight.
+const READ_TOKEN_HEADER = "X-Paste-Read-Token"
 
 export class ApiError extends Error {
   status: number
@@ -32,6 +39,11 @@ export class ApiError extends Error {
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, {
     ...init,
+    // The API uses no cookies or ambient credentials at all; saying so
+    // explicitly keeps a future same-site cookie from silently becoming an
+    // authentication signal this app never intended to have.
+    credentials: "omit",
+    referrerPolicy: "no-referrer",
     headers: { "Content-Type": "application/json", ...init?.headers },
   })
 
@@ -56,6 +68,8 @@ export function createPaste(req: CreatePasteRequest): Promise<CreatePasteRespons
   })
 }
 
-export function getPaste(id: string): Promise<GetPasteResponse> {
-  return request<GetPasteResponse>(`/api/paste/${encodeURIComponent(id)}`)
+export function getPaste(id: string, readToken: string): Promise<GetPasteResponse> {
+  return request<GetPasteResponse>(`/api/paste/${encodeURIComponent(id)}`, {
+    headers: { [READ_TOKEN_HEADER]: readToken },
+  })
 }

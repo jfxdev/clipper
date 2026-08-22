@@ -53,6 +53,7 @@ func New(ctx context.Context, cfg Config) (*Store, error) {
 type pasteDoc struct {
 	ID                string     `bson:"_id"`
 	Data              string     `bson:"data"`
+	ReadToken         string     `bson:"readToken"`
 	ExpiresAt         *time.Time `bson:"expiresAt,omitempty"`
 	BurnAfterRead     bool       `bson:"burnAfterRead"`
 	PasswordProtected bool       `bson:"passwordProtected"`
@@ -64,6 +65,7 @@ func toDoc(p paste.Paste) pasteDoc {
 	d := pasteDoc{
 		ID:                p.ID,
 		Data:              p.Data,
+		ReadToken:         p.ReadToken,
 		BurnAfterRead:     p.BurnAfterRead,
 		PasswordProtected: p.PasswordProtected,
 		CreatedAt:         p.CreatedAt,
@@ -80,6 +82,7 @@ func (d pasteDoc) toPaste() paste.Paste {
 	p := paste.Paste{
 		ID:                d.ID,
 		Data:              d.Data,
+		ReadToken:         d.ReadToken,
 		BurnAfterRead:     d.BurnAfterRead,
 		PasswordProtected: d.PasswordProtected,
 		CreatedAt:         d.CreatedAt,
@@ -96,21 +99,27 @@ func (s *Store) Create(ctx context.Context, p paste.Paste) error {
 	return err
 }
 
-func (s *Store) Get(ctx context.Context, id string) (paste.Paste, error) {
+func (s *Store) Get(ctx context.Context, id, readToken string) (paste.Paste, error) {
 	var doc pasteDoc
 
-	// Atomic burn: only matches (and deletes) a document that is both
-	// present and marked burn-after-read, so concurrent readers can never
-	// both succeed.
-	err := s.coll.FindOneAndDelete(ctx, bson.M{"_id": id, "burnAfterRead": true}).Decode(&doc)
+	// The read token is part of the filter rather than a check performed
+	// after reading, so a caller holding only the paste ID can never cause
+	// the burn-after-read delete below to fire.
+	burnFilter := bson.M{"_id": id, "readToken": readToken, "burnAfterRead": true}
+	readFilter := bson.M{"_id": id, "readToken": readToken}
+
+	// Atomic burn: only matches (and deletes) a document that is present,
+	// token-matched, and marked burn-after-read, so concurrent readers can
+	// never both succeed.
+	err := s.coll.FindOneAndDelete(ctx, burnFilter).Decode(&doc)
 	switch {
 	case err == nil:
 		// burned successfully
 	case errors.Is(err, mongo.ErrNoDocuments):
-		// Either the paste doesn't exist, or it exists but isn't
-		// burn-after-read — a plain read distinguishes the two without
-		// deleting anything.
-		err = s.coll.FindOne(ctx, bson.M{"_id": id}).Decode(&doc)
+		// Either the paste doesn't exist, the token is wrong, or it exists
+		// but isn't burn-after-read — a plain token-matched read
+		// distinguishes those without deleting anything.
+		err = s.coll.FindOne(ctx, readFilter).Decode(&doc)
 		if errors.Is(err, mongo.ErrNoDocuments) {
 			return paste.Paste{}, store.ErrNotFound
 		}

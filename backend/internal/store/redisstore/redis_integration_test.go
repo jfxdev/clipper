@@ -15,7 +15,13 @@ func TestRedisStore(t *testing.T) {
 	if addr == "" {
 		addr = "localhost:6379"
 	}
-	s := New(Config{Addr: addr})
+	// docker-compose.yml runs Redis with --requirepass, so the local
+	// instance is not an unauthenticated open port even on a laptop.
+	password := os.Getenv("REDIS_PASSWORD")
+	if password == "" {
+		password = "devpassword"
+	}
+	s := New(Config{Addr: addr, Password: password})
 	t.Cleanup(func() { _ = s.Close(context.Background()) })
 
 	if err := s.client.Ping(context.Background()).Err(); err != nil {
