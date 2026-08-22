@@ -151,12 +151,28 @@ jobs:
         run: |
           api="https://api.github.com/repos/${GITHUB_REPOSITORY}/dependency-graph/sbom"
           status=$(curl -sS -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" "$api" || echo 000)
-          if [ "$status" = "200" ]; then
-            echo "enabled=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "enabled=false" >> "$GITHUB_OUTPUT"
-            echo "::warning title=Dependency review skipped::Dependency graph is disabled for this repository (HTTP $status from the SBOM endpoint). Enable it under Settings -> Code security to turn dependency review into an enforcing check. Vulnerable dependencies are still gated by the govulncheck and npm-audit jobs."
-          fi
+          case "$status" in
+            200)
+              echo "enabled=true" >> "$GITHUB_OUTPUT"
+              ;;
+            403|404)
+              # The only two responses that actually mean "this repository
+              # does not have Dependency graph". Everything else is an
+              # unknown, handled below.
+              echo "enabled=false" >> "$GITHUB_OUTPUT"
+              echo "::warning title=Dependency review skipped::Dependency graph is disabled for this repository (HTTP $status from the SBOM endpoint). Enable it under Settings -> Code security to turn dependency review into an enforcing check. Vulnerable dependencies are still gated by the govulncheck and npm-audit jobs."
+              ;;
+            *)
+              # Fail closed. A rate limit, an expired token, a GitHub
+              # outage or a network error says nothing about whether the
+              # feature is on — and silently skipping a supply-chain check
+              # because an unrelated request wobbled is precisely the
+              # fail-open behaviour this probe exists to avoid. A red job
+              # here is re-runnable; a skipped one is invisible.
+              echo "::error title=Dependency review probe failed::Could not determine whether Dependency graph is enabled (HTTP $status from the SBOM endpoint). Refusing to skip the check on an unknown response."
+              exit 1
+              ;;
+          esac
       # No continue-on-error: when this runs at all, a high-severity
       # finding fails the build.
       - uses: actions/dependency-review-action@v4
