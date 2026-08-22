@@ -17,7 +17,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/dynamodb v1.63.4
 	github.com/redis/go-redis/v9 v9.22.0
 	go.mongodb.org/mongo-driver/v2 v2.8.0
-	golang.org/x/time v0.9.0
+	golang.org/x/time v0.15.0
 )
 
 require (
