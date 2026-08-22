@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent } from "react"
 import { useParams } from "react-router-dom"
-import { AlertCircle, Flame } from "lucide-react"
+import { AlertCircle, Eye, EyeOff, Flame } from "lucide-react"
 
 import {
   Card,
@@ -161,11 +161,50 @@ function ViewPasteInner({ id }: { id?: string }) {
         )}
       </CardHeader>
       <CardContent>
-        <pre className="bg-muted overflow-x-auto rounded-md p-4 text-left text-sm whitespace-pre-wrap break-words">
-          {phase.plaintext}
-        </pre>
+        <PasteReveal text={phase.plaintext} />
       </CardContent>
     </Card>
+  )
+}
+
+// Hidden by default so the secret isn't shown the instant the page loads —
+// over someone's shoulder, in a screen share, or in a browser preview
+// thumbnail. The user has to deliberately click to reveal it.
+function PasteReveal({ text }: { text: string }) {
+  const [revealed, setRevealed] = useState(false)
+
+  return (
+    <div className="relative">
+      <pre
+        className={`bg-muted overflow-x-auto rounded-md p-4 text-left text-sm whitespace-pre-wrap break-words ${
+          revealed ? "" : "select-none blur-sm"
+        }`}
+      >
+        {text}
+      </pre>
+      {!revealed && (
+        <button
+          type="button"
+          onClick={() => setRevealed(true)}
+          className="bg-background/60 hover:bg-background/70 absolute inset-0 flex items-center justify-center gap-1.5 rounded-md text-sm font-medium transition-colors"
+        >
+          <Eye className="size-4" />
+          Revelar mensagem
+        </button>
+      )}
+      {revealed && (
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="mt-2"
+          onClick={() => setRevealed(false)}
+        >
+          <EyeOff className="size-4" />
+          Ocultar
+        </Button>
+      )}
+    </div>
   )
 }
 
