@@ -138,7 +138,7 @@ function ViewPasteInner({ id }: { id?: string }) {
 
   if (phase.kind === "invalid-link") {
     return phase.alreadyViewed ? (
-      <ErrorCard message="Você já abriu esta mensagem nesta aba. Por segurança, a chave de decriptação some da URL assim que o link é usado, então atualizar a página não mostra o conteúdo de novo — abra o link original novamente se ainda precisar dele." />
+      <ErrorCard message="Você já abriu esta mensagem nesta aba. Abra o link original novamente se ainda precisar dele." />
     ) : (
       <ErrorCard message='Este link está incompleto: falta a chave de decriptação (o trecho depois de "#").' />
     )
