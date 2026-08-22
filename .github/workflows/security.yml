@@ -138,15 +138,29 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-      # Advisory, not a gate: the action errors out entirely when the
-      # repository has Dependency graph disabled, which is a settings
-      # decision no workflow can make for itself
-      # (Settings -> Code security -> Dependency graph). Enabling it turns
-      # this into an enforcing check; until then a red X here would say
-      # nothing about the code. Vulnerable dependencies are still gated by
-      # the govulncheck and npm-audit jobs above, which do fail the build.
+      # The action errors out entirely when the repository has Dependency
+      # graph disabled, which is a settings decision no workflow can make
+      # for itself (Settings -> Code security -> Dependency graph). Probing
+      # for it and skipping is honest about that; blanket
+      # continue-on-error would not be, because it would also swallow a
+      # genuine high-severity finding the day the setting is turned on.
+      - name: check whether Dependency graph is enabled
+        id: depgraph
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          api="https://api.github.com/repos/${GITHUB_REPOSITORY}/dependency-graph/sbom"
+          status=$(curl -sS -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" "$api" || echo 000)
+          if [ "$status" = "200" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "::warning title=Dependency review skipped::Dependency graph is disabled for this repository (HTTP $status from the SBOM endpoint). Enable it under Settings -> Code security to turn dependency review into an enforcing check. Vulnerable dependencies are still gated by the govulncheck and npm-audit jobs."
+          fi
+      # No continue-on-error: when this runs at all, a high-severity
+      # finding fails the build.
       - uses: actions/dependency-review-action@v4
-        continue-on-error: true
+        if: steps.depgraph.outputs.enabled == 'true'
         with:
           fail-on-severity: high
 

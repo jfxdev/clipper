@@ -1,9 +1,11 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
+	"net"
 	"net/http"
 	"time"
 
@@ -122,7 +124,15 @@ func (h *Handlers) CreatePaste(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.store.Create(r.Context(), p); err != nil {
-		if h.cfg.Quota != nil {
+		// Refund only when the write definitively did not happen. Store.Create
+		// reports an error, not an outcome: a deadline or cancellation can fire
+		// after the datastore already committed, and refunding that "unknown"
+		// would let a client retry its way past the quota — each attempt
+		// charged once and refunded once while pastes accumulate. Failures
+		// that never reached the store (a refused connection, a rejected
+		// request) are not ambiguous and are refunded, which is what keeps an
+		// outage from silently consuming everyone's allowance.
+		if h.cfg.Quota != nil && !writeOutcomeIsUnknown(r.Context(), err) {
 			h.cfg.Quota.Refund(r, size)
 		}
 		writeError(w, err)
@@ -130,6 +140,21 @@ func (h *Handlers) CreatePaste(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusCreated, createPasteResponse{ID: id})
+}
+
+// writeOutcomeIsUnknown reports whether a failed store write may still have
+// been committed on the far side. Timeouts and cancellations are the
+// ambiguous cases: the request was in flight, and the error says only that
+// we stopped waiting for the answer.
+func writeOutcomeIsUnknown(ctx context.Context, err error) bool {
+	if ctx.Err() != nil {
+		return true
+	}
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+		return true
+	}
+	var netErr net.Error
+	return errors.As(err, &netErr) && netErr.Timeout()
 }
 
 func (h *Handlers) GetPaste(w http.ResponseWriter, r *http.Request) {
