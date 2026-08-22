@@ -226,7 +226,7 @@ jobs:
             anchore/syft:v1.51.0@sha256:678bfa565b60f747aac0f8e964fe5588a24445b8d0a480e91f6efd70020dfbb0 \
             scan docker-archive:/scan/clipper-image.tar \
             -o spdx-json=/scan/clipper-sbom.spdx.json
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: clipper-sbom
           path: ${{ runner.temp }}/clipper-sbom.spdx.json
