@@ -15,8 +15,14 @@ const LANGUAGE_NAMES: Record<SupportedLanguage, string> = {
   es: "Español",
 }
 
+const LANGUAGE_FLAGS: Record<SupportedLanguage, string> = {
+  pt: "🇧🇷",
+  en: "🇺🇸",
+  es: "🇪🇸",
+}
+
 export function LanguageSwitcher() {
-  const { i18n } = useTranslation()
+  const { t, i18n } = useTranslation()
   // i18next-browser-languagedetector can resolve to a region-qualified tag
   // (e.g. "pt-BR") even with load: "languageOnly" applied to resources;
   // normalize back to the base code so the Select's value matches an item.
@@ -27,12 +33,13 @@ export function LanguageSwitcher() {
       value={current}
       onValueChange={(lng) => void i18n.changeLanguage(lng)}
     >
-      <SelectTrigger className="w-auto" aria-label="Language">
+      <SelectTrigger className="w-auto" aria-label={t("language.label")}>
         <SelectValue />
       </SelectTrigger>
       <SelectContent>
         {SUPPORTED_LANGUAGES.map((lng) => (
           <SelectItem key={lng} value={lng}>
+            <span aria-hidden="true">{LANGUAGE_FLAGS[lng]}</span>
             {LANGUAGE_NAMES[lng]}
           </SelectItem>
         ))}

@@ -10,6 +10,9 @@
     "dark": "Dark",
     "system": "System"
   },
+  "language": {
+    "label": "Language"
+  },
   "create": {
     "tagline": "Share encrypted text that only the person with the link can read.",
     "textLabel": "Text",

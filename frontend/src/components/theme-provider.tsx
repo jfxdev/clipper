@@ -3,6 +3,12 @@ import { createContext, useContext, useEffect, useState } from "react"
 
 type Theme = "light" | "dark" | "system"
 
+const THEMES: Theme[] = ["light", "dark", "system"]
+
+function isTheme(value: string | null): value is Theme {
+  return value !== null && (THEMES as string[]).includes(value)
+}
+
 type ThemeProviderProps = {
   children: React.ReactNode
   defaultTheme?: Theme
@@ -36,9 +42,10 @@ export function ThemeProvider({
   defaultTheme = "system",
   storageKey = "clipper-ui-theme",
 }: ThemeProviderProps) {
-  const [theme, setThemeState] = useState<Theme>(
-    () => (localStorage.getItem(storageKey) as Theme | null) ?? defaultTheme,
-  )
+  const [theme, setThemeState] = useState<Theme>(() => {
+    const stored = localStorage.getItem(storageKey)
+    return isTheme(stored) ? stored : defaultTheme
+  })
 
   useEffect(() => {
     applyTheme(theme)

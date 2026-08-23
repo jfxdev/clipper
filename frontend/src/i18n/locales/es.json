@@ -10,6 +10,9 @@
     "dark": "Oscuro",
     "system": "Sistema"
   },
+  "language": {
+    "label": "Idioma"
+  },
   "create": {
     "tagline": "Comparte texto cifrado que solo quien recibe el enlace puede leer.",
     "textLabel": "Texto",
