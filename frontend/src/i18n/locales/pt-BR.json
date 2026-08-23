@@ -1,0 +1,72 @@
+{
+  "common": {
+    "appName": "clipper",
+    "error": "Erro",
+    "cancel": "Cancelar"
+  },
+  "theme": {
+    "label": "Tema",
+    "light": "Claro",
+    "dark": "Escuro",
+    "system": "Sistema"
+  },
+  "language": {
+    "label": "Idioma"
+  },
+  "create": {
+    "tagline": "Compartilhe texto cifrado que só quem recebe o link consegue ler.",
+    "textLabel": "Texto",
+    "textPlaceholder": "Cole ou digite o texto a compartilhar...",
+    "expirationLabel": "Expira em",
+    "passwordLabel": "Senha adicional (opcional)",
+    "passwordPlaceholder": "Deixe em branco para não usar senha",
+    "passwordHint": "Se usar, escolha uma frase de pelo menos {{count}} caracteres e combine-a por outro canal, nunca junto com o link.",
+    "submitIdle": "Criar link cifrado",
+    "submitBusy": "Cifrando...",
+    "emptyTextError": "Digite algum texto para compartilhar.",
+    "passwordTooShortError": "A senha adicional precisa ter pelo menos {{count}} caracteres — quem tem o link pode tentar adivinhá-la offline, sem limite de tentativas.",
+    "genericError": "Falha ao criar o link. Tente novamente.",
+    "readyTitle": "Link pronto",
+    "readyDescription": "Compartilhe este link com quem deve ler a mensagem. Só quem tiver o link completo (incluindo o trecho depois de \"#\") consegue decifrar o conteúdo — nós nunca vimos o texto original.",
+    "createAnother": "Criar outro link"
+  },
+  "burnAfterRead": {
+    "label": "Destruir após a leitura"
+  },
+  "burnConfirm": {
+    "title": "Esta mensagem será destruída após a leitura",
+    "description": "Assim que você abrir este link, o conteúdo é apagado permanentemente do servidor e não poderá ser acessado de novo — nem por você.",
+    "confirm": "Ver mensagem"
+  },
+  "expiration": {
+    "placeholder": "Expiração",
+    "10m": "10 minutos",
+    "1h": "1 hora",
+    "1d": "1 dia",
+    "1w": "1 semana",
+    "30d": "30 dias"
+  },
+  "shareLink": {
+    "copy": "Copiar",
+    "copied": "Copiado"
+  },
+  "view": {
+    "title": "Mensagem",
+    "burnedNotice": "Esta mensagem foi destruída e não pode ser lida novamente.",
+    "loading": "Carregando...",
+    "cancelledMessage": "Leitura cancelada. A mensagem não foi acessada.",
+    "awaitingConfirm": "Aguardando confirmação...",
+    "invalidLink": "Este link está incompleto: falta a chave de decriptação (o trecho depois de \"#\").",
+    "alreadyViewed": "Você já abriu esta mensagem nesta aba. Abra o link original novamente se ainda precisar dele.",
+    "notFound": "Este link não existe, já expirou ou já foi lido.",
+    "decryptError": "Não foi possível decifrar esta mensagem. O link pode estar incompleto.",
+    "errorTitle": "Não foi possível abrir este link",
+    "passwordPromptTitle": "Esta mensagem tem uma senha",
+    "passwordPromptDescription": "Digite a senha combinada com quem te enviou o link.",
+    "passwordPromptWrong": "Senha incorreta. Tente novamente.",
+    "passwordFieldLabel": "Senha",
+    "decryptButton": "Decifrar",
+    "revealButton": "Revelar mensagem",
+    "hideButton": "Ocultar"
+  }
+}

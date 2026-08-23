@@ -1,0 +1,72 @@
+{
+  "common": {
+    "appName": "clipper",
+    "error": "Error",
+    "cancel": "Cancel"
+  },
+  "theme": {
+    "label": "Theme",
+    "light": "Light",
+    "dark": "Dark",
+    "system": "System"
+  },
+  "language": {
+    "label": "Language"
+  },
+  "create": {
+    "tagline": "Share encrypted text that only the person with the link can read.",
+    "textLabel": "Text",
+    "textPlaceholder": "Paste or type the text to share...",
+    "expirationLabel": "Expires in",
+    "passwordLabel": "Extra password (optional)",
+    "passwordPlaceholder": "Leave blank to skip a password",
+    "passwordHint": "If you use one, pick a phrase of at least {{count}} characters and share it over a different channel — never alongside the link.",
+    "submitIdle": "Create encrypted link",
+    "submitBusy": "Encrypting...",
+    "emptyTextError": "Type some text to share.",
+    "passwordTooShortError": "The extra password needs at least {{count}} characters — anyone with the link can try to guess it offline, with no attempt limit.",
+    "genericError": "Failed to create the link. Try again.",
+    "readyTitle": "Link ready",
+    "readyDescription": "Share this link with whoever should read the message. Only someone with the complete link (including the part after \"#\") can decrypt the content — we never saw the original text.",
+    "createAnother": "Create another link"
+  },
+  "burnAfterRead": {
+    "label": "Destroy after reading"
+  },
+  "burnConfirm": {
+    "title": "This message will be destroyed after reading",
+    "description": "As soon as you open this link, the content is permanently erased from the server and can't be accessed again — not even by you.",
+    "confirm": "View message"
+  },
+  "expiration": {
+    "placeholder": "Expiration",
+    "10m": "10 minutes",
+    "1h": "1 hour",
+    "1d": "1 day",
+    "1w": "1 week",
+    "30d": "30 days"
+  },
+  "shareLink": {
+    "copy": "Copy",
+    "copied": "Copied"
+  },
+  "view": {
+    "title": "Message",
+    "burnedNotice": "This message has been destroyed and can't be read again.",
+    "loading": "Loading...",
+    "cancelledMessage": "Reading cancelled. The message was not accessed.",
+    "awaitingConfirm": "Waiting for confirmation...",
+    "invalidLink": "This link is incomplete: the decryption key is missing (the part after \"#\").",
+    "alreadyViewed": "You already opened this message in this tab. Open the original link again if you still need it.",
+    "notFound": "This link doesn't exist, has expired, or was already read.",
+    "decryptError": "Couldn't decrypt this message. The link may be incomplete.",
+    "errorTitle": "Couldn't open this link",
+    "passwordPromptTitle": "This message has a password",
+    "passwordPromptDescription": "Enter the password agreed with whoever sent you the link.",
+    "passwordPromptWrong": "Wrong password. Try again.",
+    "passwordFieldLabel": "Password",
+    "decryptButton": "Decrypt",
+    "revealButton": "Reveal message",
+    "hideButton": "Hide"
+  }
+}

@@ -1,0 +1,72 @@
+{
+  "common": {
+    "appName": "clipper",
+    "error": "Error",
+    "cancel": "Cancelar"
+  },
+  "theme": {
+    "label": "Tema",
+    "light": "Claro",
+    "dark": "Oscuro",
+    "system": "Sistema"
+  },
+  "language": {
+    "label": "Idioma"
+  },
+  "create": {
+    "tagline": "Comparte texto cifrado que solo quien recibe el enlace puede leer.",
+    "textLabel": "Texto",
+    "textPlaceholder": "Pega o escribe el texto a compartir...",
+    "expirationLabel": "Expira en",
+    "passwordLabel": "Contraseña adicional (opcional)",
+    "passwordPlaceholder": "Déjalo en blanco para no usar contraseña",
+    "passwordHint": "Si la usas, elige una frase de al menos {{count}} caracteres y compártela por otro canal, nunca junto al enlace.",
+    "submitIdle": "Crear enlace cifrado",
+    "submitBusy": "Cifrando...",
+    "emptyTextError": "Escribe algún texto para compartir.",
+    "passwordTooShortError": "La contraseña adicional necesita al menos {{count}} caracteres — quien tenga el enlace puede intentar adivinarla sin conexión, sin límite de intentos.",
+    "genericError": "No se pudo crear el enlace. Intenta de nuevo.",
+    "readyTitle": "Enlace listo",
+    "readyDescription": "Comparte este enlace con quien deba leer el mensaje. Solo quien tenga el enlace completo (incluyendo la parte después de \"#\") puede descifrar el contenido — nunca vimos el texto original.",
+    "createAnother": "Crear otro enlace"
+  },
+  "burnAfterRead": {
+    "label": "Destruir tras la lectura"
+  },
+  "burnConfirm": {
+    "title": "Este mensaje se destruirá después de leerlo",
+    "description": "En cuanto abras este enlace, el contenido se borra permanentemente del servidor y no podrá volver a accederse — ni siquiera por ti.",
+    "confirm": "Ver mensaje"
+  },
+  "expiration": {
+    "placeholder": "Expiración",
+    "10m": "10 minutos",
+    "1h": "1 hora",
+    "1d": "1 día",
+    "1w": "1 semana",
+    "30d": "30 días"
+  },
+  "shareLink": {
+    "copy": "Copiar",
+    "copied": "Copiado"
+  },
+  "view": {
+    "title": "Mensaje",
+    "burnedNotice": "Este mensaje fue destruido y no se puede volver a leer.",
+    "loading": "Cargando...",
+    "cancelledMessage": "Lectura cancelada. El mensaje no fue accedido.",
+    "awaitingConfirm": "Esperando confirmación...",
+    "invalidLink": "Este enlace está incompleto: falta la clave de descifrado (la parte después de \"#\").",
+    "alreadyViewed": "Ya abriste este mensaje en esta pestaña. Abre el enlace original de nuevo si aún lo necesitas.",
+    "notFound": "Este enlace no existe, ya expiró o ya fue leído.",
+    "decryptError": "No se pudo descifrar este mensaje. El enlace puede estar incompleto.",
+    "errorTitle": "No se pudo abrir este enlace",
+    "passwordPromptTitle": "Este mensaje tiene contraseña",
+    "passwordPromptDescription": "Ingresa la contraseña acordada con quien te envió el enlace.",
+    "passwordPromptWrong": "Contraseña incorrecta. Intenta de nuevo.",
+    "passwordFieldLabel": "Contraseña",
+    "decryptButton": "Descifrar",
+    "revealButton": "Revelar mensaje",
+    "hideButton": "Ocultar"
+  }
+}

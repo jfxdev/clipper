@@ -1,6 +1,7 @@
 import { useEffect, useState, type FormEvent } from "react"
 import { useParams } from "react-router-dom"
-import { AlertCircle, Flame } from "lucide-react"
+import { useTranslation } from "react-i18next"
+import { AlertCircle, Check, Copy, Eye, EyeOff, Flame } from "lucide-react"
 
 import {
   Card,
@@ -32,8 +33,31 @@ function clearKeyFragment() {
   }
 }
 
+// clearKeyFragment strips the key from the address bar once a paste is
+// decrypted, so a reload of that same tab arrives with no hash — otherwise
+// indistinguishable from a link that was never valid. Recording the id here
+// lets that reload say "you already read this" instead of "broken link".
+const VIEWED_PREFIX = "clipper:viewed:"
+
+function markViewed(id: string) {
+  try {
+    sessionStorage.setItem(VIEWED_PREFIX + id, "1")
+  } catch {
+    // Private-browsing modes can disallow sessionStorage; the reload then
+    // just falls back to the generic "incomplete link" message.
+  }
+}
+
+function wasViewed(id: string): boolean {
+  try {
+    return sessionStorage.getItem(VIEWED_PREFIX + id) === "1"
+  } catch {
+    return false
+  }
+}
+
 type Phase =
-  | { kind: "invalid-link" }
+  | { kind: "invalid-link"; alreadyViewed: boolean }
   | { kind: "awaiting-burn-confirm" }
   | { kind: "cancelled" }
   | { kind: "loading" }
@@ -54,9 +78,12 @@ export function ViewPastePage() {
 }
 
 function ViewPasteInner({ id }: { id?: string }) {
+  const { t } = useTranslation()
   const [hashInfo] = useState(() => parseShareHash(window.location.hash))
   const [phase, setPhase] = useState<Phase>(() => {
-    if (!id || !hashInfo) return { kind: "invalid-link" }
+    if (!id || !hashInfo) {
+      return { kind: "invalid-link", alreadyViewed: !!id && wasViewed(id) }
+    }
     return hashInfo.isBurnHint ? { kind: "awaiting-burn-confirm" } : { kind: "loading" }
   })
 
@@ -75,6 +102,7 @@ function ViewPasteInner({ id }: { id?: string }) {
       }
       const plaintext = await decryptBlob(paste.data, hashInfo.keyFragment, password)
       clearKeyFragment()
+      markViewed(id)
       setPhase({ kind: "ready", plaintext, burnAfterRead: paste.burnAfterRead })
     } catch (err) {
       setPhase({
@@ -82,9 +110,9 @@ function ViewPasteInner({ id }: { id?: string }) {
         message:
           err instanceof ApiError
             ? err.status === 404
-              ? "Este link não existe, já expirou ou já foi lido."
+              ? t("view.notFound")
               : err.message
-            : "Não foi possível decifrar esta mensagem. O link pode estar incompleto.",
+            : t("view.decryptError"),
       })
     }
   }
@@ -99,30 +127,33 @@ function ViewPasteInner({ id }: { id?: string }) {
   }, [])
 
   async function handlePasswordSubmit(paste: GetPasteResponse, password: string) {
-    if (!hashInfo) return
+    if (!hashInfo || !id) return
     try {
       const plaintext = await decryptBlob(paste.data, hashInfo.keyFragment, password)
       clearKeyFragment()
+      markViewed(id)
       setPhase({ kind: "ready", plaintext, burnAfterRead: paste.burnAfterRead })
     } catch {
-      setPhase({ kind: "needs-password", paste, error: "Senha incorreta. Tente novamente." })
+      setPhase({ kind: "needs-password", paste, error: t("view.passwordPromptWrong") })
     }
   }
 
   if (phase.kind === "invalid-link") {
-    return (
-      <ErrorCard message='Este link está incompleto: falta a chave de decriptação (o trecho depois de "#").' />
+    return phase.alreadyViewed ? (
+      <ErrorCard message={t("view.alreadyViewed")} />
+    ) : (
+      <ErrorCard message={t("view.invalidLink")} />
     )
   }
 
   if (phase.kind === "cancelled") {
-    return <ErrorCard message="Leitura cancelada. A mensagem não foi acessada." />
+    return <ErrorCard message={t("view.cancelledMessage")} />
   }
 
   if (phase.kind === "awaiting-burn-confirm") {
     return (
       <>
-        <p className="text-muted-foreground text-sm">Aguardando confirmação...</p>
+        <p className="text-muted-foreground text-sm">{t("view.awaitingConfirm")}</p>
         <BurnConfirmDialog
           open
           onConfirm={() => void load()}
@@ -133,7 +164,7 @@ function ViewPasteInner({ id }: { id?: string }) {
   }
 
   if (phase.kind === "loading") {
-    return <p className="text-muted-foreground text-sm">Carregando...</p>
+    return <p className="text-muted-foreground text-sm">{t("view.loading")}</p>
   }
 
   if (phase.kind === "error") {
@@ -152,28 +183,93 @@ function ViewPasteInner({ id }: { id?: string }) {
   return (
     <Card className="w-full max-w-lg">
       <CardHeader>
-        <CardTitle>Mensagem</CardTitle>
+        <CardTitle>{t("view.title")}</CardTitle>
         {phase.burnAfterRead && (
           <CardDescription className="flex items-center gap-1.5 text-amber-600 dark:text-amber-500">
             <Flame className="size-4" />
-            Esta mensagem foi destruída e não pode ser lida novamente.
+            {t("view.burnedNotice")}
           </CardDescription>
         )}
       </CardHeader>
       <CardContent>
-        <pre className="bg-muted overflow-x-auto rounded-md p-4 text-left text-sm whitespace-pre-wrap break-words">
-          {phase.plaintext}
-        </pre>
+        <PasteReveal text={phase.plaintext} />
       </CardContent>
     </Card>
   )
 }
 
+// Hidden by default so the secret isn't shown the instant the page loads —
+// over someone's shoulder, in a screen share, or in a browser preview
+// thumbnail. The user has to deliberately click to reveal it.
+function PasteReveal({ text }: { text: string }) {
+  const { t } = useTranslation()
+  const [revealed, setRevealed] = useState(false)
+  const [copied, setCopied] = useState(false)
+
+  async function handleCopy() {
+    try {
+      await navigator.clipboard.writeText(text)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    } catch {
+      // Clipboard API unavailable/denied; nothing else to fall back to
+      // since the text is intentionally blurred/hidden, not selectable.
+    }
+  }
+
+  return (
+    <div className="relative">
+      <pre
+        className={`bg-muted overflow-x-auto rounded-md p-4 pr-20 text-left text-sm whitespace-pre-wrap break-words ${
+          revealed ? "" : "select-none blur-sm"
+        }`}
+      >
+        {text}
+      </pre>
+      {!revealed && (
+        <button
+          type="button"
+          onClick={() => setRevealed(true)}
+          className="bg-background/60 hover:bg-background/70 absolute inset-0 flex items-center justify-center gap-1.5 rounded-md text-sm font-medium transition-colors"
+        >
+          <Eye className="size-4" />
+          {t("view.revealButton")}
+        </button>
+      )}
+      {revealed && (
+        <div className="absolute top-2 right-2 flex gap-1">
+          <Button
+            type="button"
+            variant="secondary"
+            size="icon"
+            className="size-8"
+            aria-label={copied ? t("shareLink.copied") : t("shareLink.copy")}
+            onClick={handleCopy}
+          >
+            {copied ? <Check className="size-4" /> : <Copy className="size-4" />}
+          </Button>
+          <Button
+            type="button"
+            variant="secondary"
+            size="icon"
+            className="size-8"
+            aria-label={t("view.hideButton")}
+            onClick={() => setRevealed(false)}
+          >
+            <EyeOff className="size-4" />
+          </Button>
+        </div>
+      )}
+    </div>
+  )
+}
+
 function ErrorCard({ message }: { message: string }) {
+  const { t } = useTranslation()
   return (
     <Alert variant="destructive" className="w-full max-w-lg">
       <AlertCircle />
-      <AlertTitle>Não foi possível abrir este link</AlertTitle>
+      <AlertTitle>{t("view.errorTitle")}</AlertTitle>
       <AlertDescription>{message}</AlertDescription>
     </Alert>
   )
@@ -186,6 +282,7 @@ function PasswordPrompt({
   error?: string
   onSubmit: (password: string) => void
 }) {
+  const { t } = useTranslation()
   const [password, setPassword] = useState("")
 
   function handleSubmit(e: FormEvent) {
@@ -196,14 +293,14 @@ function PasswordPrompt({
   return (
     <Card className="w-full max-w-lg">
       <CardHeader>
-        <CardTitle>Esta mensagem tem uma senha</CardTitle>
-        <CardDescription>Digite a senha combinada com quem te enviou o link.</CardDescription>
+        <CardTitle>{t("view.passwordPromptTitle")}</CardTitle>
+        <CardDescription>{t("view.passwordPromptDescription")}</CardDescription>
       </CardHeader>
       <form onSubmit={handleSubmit}>
         <CardContent className="grid gap-4">
           <PasswordField
             id="view-password"
-            label="Senha"
+            label={t("view.passwordFieldLabel")}
             value={password}
             onChange={setPassword}
             autoFocus
@@ -217,7 +314,7 @@ function PasswordPrompt({
         </CardContent>
         <CardFooter>
           <Button type="submit" className="w-full">
-            Decifrar
+            {t("view.decryptButton")}
           </Button>
         </CardFooter>
       </form>
