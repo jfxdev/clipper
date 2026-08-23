@@ -19,6 +19,12 @@ services:
       - redis-server
       - --requirepass
       - ${REDIS_PASSWORD:-devpassword}
+      # /data is tmpfs — there is no real disk to snapshot to, and the
+      # backend never asks Redis to persist anyway (pastes carry their own
+      # TTL). Without this, the default periodic bgsave eventually fails on
+      # the ephemeral mount and Redis stops accepting writes entirely.
+      - --save
+      - ""
     ports:
       - "127.0.0.1:6379:6379"
     read_only: true
