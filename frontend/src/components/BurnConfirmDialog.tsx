@@ -1,3 +1,5 @@
+import { useTranslation } from "react-i18next"
+
 import {
   Dialog,
   DialogContent,
@@ -17,21 +19,19 @@ interface BurnConfirmDialogProps {
 // Gates the burn-after-read fetch behind an explicit confirmation, so
 // simply opening/refreshing the page can't destroy the message on its own.
 export function BurnConfirmDialog({ open, onConfirm, onCancel }: BurnConfirmDialogProps) {
+  const { t } = useTranslation()
   return (
     <Dialog open={open} onOpenChange={(next) => { if (!next) onCancel() }}>
       <DialogContent showCloseButton={false}>
         <DialogHeader>
-          <DialogTitle>Esta mensagem será destruída após a leitura</DialogTitle>
-          <DialogDescription>
-            Assim que você abrir este link, o conteúdo é apagado permanentemente
-            do servidor e não poderá ser acessado de novo — nem por você.
-          </DialogDescription>
+          <DialogTitle>{t("burnConfirm.title")}</DialogTitle>
+          <DialogDescription>{t("burnConfirm.description")}</DialogDescription>
         </DialogHeader>
         <DialogFooter>
           <Button variant="outline" onClick={onCancel}>
-            Cancelar
+            {t("common.cancel")}
           </Button>
-          <Button onClick={onConfirm}>Ver mensagem</Button>
+          <Button onClick={onConfirm}>{t("burnConfirm.confirm")}</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

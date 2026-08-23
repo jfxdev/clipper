@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from "react"
+import { useTranslation } from "react-i18next"
 import { AlertCircle } from "lucide-react"
 
 import {
@@ -30,6 +31,7 @@ const DEFAULT_EXPIRE_SECONDS = 86400 // 1 day
 const MIN_PASSWORD_LENGTH = 10
 
 export function CreatePastePage() {
+  const { t } = useTranslation()
   const [text, setText] = useState("")
   const [expireSeconds, setExpireSeconds] = useState(DEFAULT_EXPIRE_SECONDS)
   const [burnAfterRead, setBurnAfterRead] = useState(false)
@@ -41,14 +43,11 @@ export function CreatePastePage() {
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
     if (!text.trim()) {
-      setError("Digite algum texto para compartilhar.")
+      setError(t("create.emptyTextError"))
       return
     }
     if (password && password.length < MIN_PASSWORD_LENGTH) {
-      setError(
-        `A senha adicional precisa ter pelo menos ${MIN_PASSWORD_LENGTH} caracteres — ` +
-          "quem tem o link pode tentar adivinhá-la offline, sem limite de tentativas."
-      )
+      setError(t("create.passwordTooShortError", { count: MIN_PASSWORD_LENGTH }))
       return
     }
 
@@ -70,11 +69,7 @@ export function CreatePastePage() {
       setText("")
       setPassword("")
     } catch (err) {
-      setError(
-        err instanceof ApiError
-          ? err.message
-          : "Falha ao criar o link. Tente novamente."
-      )
+      setError(err instanceof ApiError ? err.message : t("create.genericError"))
     } finally {
       setSubmitting(false)
     }
@@ -84,19 +79,15 @@ export function CreatePastePage() {
     return (
       <Card className="w-full max-w-lg">
         <CardHeader>
-          <CardTitle>Link pronto</CardTitle>
-          <CardDescription>
-            Compartilhe este link com quem deve ler a mensagem. Só quem tiver
-            o link completo (incluindo o trecho depois de "#") consegue
-            decifrar o conteúdo — nós nunca vimos o texto original.
-          </CardDescription>
+          <CardTitle>{t("create.readyTitle")}</CardTitle>
+          <CardDescription>{t("create.readyDescription")}</CardDescription>
         </CardHeader>
         <CardContent>
           <ShareLinkBox url={shareUrl} />
         </CardContent>
         <CardFooter>
           <Button variant="outline" onClick={() => setShareUrl(null)}>
-            Criar outro link
+            {t("create.createAnother")}
           </Button>
         </CardFooter>
       </Card>
@@ -106,26 +97,24 @@ export function CreatePastePage() {
   return (
     <Card className="w-full max-w-lg">
       <CardHeader>
-        <CardTitle>clipper</CardTitle>
-        <CardDescription>
-          Compartilhe texto cifrado que só quem recebe o link consegue ler.
-        </CardDescription>
+        <CardTitle>{t("common.appName")}</CardTitle>
+        <CardDescription>{t("create.tagline")}</CardDescription>
       </CardHeader>
       <form onSubmit={handleSubmit}>
         <CardContent className="grid gap-4">
           <div className="grid gap-1.5">
-            <Label htmlFor="paste-text">Texto</Label>
+            <Label htmlFor="paste-text">{t("create.textLabel")}</Label>
             <Textarea
               id="paste-text"
               value={text}
               onChange={(e) => setText(e.target.value)}
-              placeholder="Cole ou digite o texto a compartilhar..."
+              placeholder={t("create.textPlaceholder")}
               rows={8}
             />
           </div>
 
           <div className="grid gap-1.5">
-            <Label htmlFor="paste-expiration">Expira em</Label>
+            <Label htmlFor="paste-expiration">{t("create.expirationLabel")}</Label>
             <ExpirationPicker
               id="paste-expiration"
               value={expireSeconds}
@@ -137,24 +126,24 @@ export function CreatePastePage() {
 
           <PasswordField
             id="paste-password"
-            label="Senha adicional (opcional)"
+            label={t("create.passwordLabel")}
             value={password}
             onChange={setPassword}
-            placeholder="Deixe em branco para não usar senha"
-            hint={`Se usar, escolha uma frase de pelo menos ${MIN_PASSWORD_LENGTH} caracteres e combine-a por outro canal, nunca junto com o link.`}
+            placeholder={t("create.passwordPlaceholder")}
+            hint={t("create.passwordHint", { count: MIN_PASSWORD_LENGTH })}
           />
 
           {error && (
             <Alert variant="destructive">
               <AlertCircle />
-              <AlertTitle>Erro</AlertTitle>
+              <AlertTitle>{t("common.error")}</AlertTitle>
               <AlertDescription>{error}</AlertDescription>
             </Alert>
           )}
         </CardContent>
         <CardFooter>
           <Button type="submit" disabled={submitting} className="w-full">
-            {submitting ? "Cifrando..." : "Criar link cifrado"}
+            {submitting ? t("create.submitBusy") : t("create.submitIdle")}
           </Button>
         </CardFooter>
       </form>

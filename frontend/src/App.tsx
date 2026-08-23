@@ -2,10 +2,14 @@ import { Routes, Route } from "react-router-dom"
 
 import { CreatePastePage } from "@/pages/CreatePastePage"
 import { ViewPastePage } from "@/pages/ViewPastePage"
+import { LanguageSwitcher } from "@/components/LanguageSwitcher"
 
 function App() {
   return (
     <div className="flex min-h-svh items-start justify-center p-4 pt-16 sm:pt-24">
+      <div className="fixed top-4 right-4">
+        <LanguageSwitcher />
+      </div>
       <Routes>
         <Route path="/" element={<CreatePastePage />} />
         <Route path="/paste/:id" element={<ViewPastePage />} />

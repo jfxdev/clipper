@@ -1,4 +1,5 @@
 import { useState } from "react"
+import { useTranslation } from "react-i18next"
 import { Check, Copy } from "lucide-react"
 
 import { Input } from "@/components/ui/input"
@@ -9,6 +10,7 @@ interface ShareLinkBoxProps {
 }
 
 export function ShareLinkBox({ url }: ShareLinkBoxProps) {
+  const { t } = useTranslation()
   const [copied, setCopied] = useState(false)
 
   async function handleCopy() {
@@ -32,7 +34,7 @@ export function ShareLinkBox({ url }: ShareLinkBoxProps) {
       />
       <Button type="button" variant="secondary" onClick={handleCopy}>
         {copied ? <Check className="size-4" /> : <Copy className="size-4" />}
-        {copied ? "Copiado" : "Copiar"}
+        {copied ? t("shareLink.copied") : t("shareLink.copy")}
       </Button>
     </div>
   )

@@ -1,5 +1,6 @@
 import { useEffect, useState, type FormEvent } from "react"
 import { useParams } from "react-router-dom"
+import { useTranslation } from "react-i18next"
 import { AlertCircle, Eye, EyeOff, Flame } from "lucide-react"
 
 import {
@@ -77,6 +78,7 @@ export function ViewPastePage() {
 }
 
 function ViewPasteInner({ id }: { id?: string }) {
+  const { t } = useTranslation()
   const [hashInfo] = useState(() => parseShareHash(window.location.hash))
   const [phase, setPhase] = useState<Phase>(() => {
     if (!id || !hashInfo) {
@@ -108,9 +110,9 @@ function ViewPasteInner({ id }: { id?: string }) {
         message:
           err instanceof ApiError
             ? err.status === 404
-              ? "Este link não existe, já expirou ou já foi lido."
+              ? t("view.notFound")
               : err.message
-            : "Não foi possível decifrar esta mensagem. O link pode estar incompleto.",
+            : t("view.decryptError"),
       })
     }
   }
@@ -132,26 +134,26 @@ function ViewPasteInner({ id }: { id?: string }) {
       markViewed(id)
       setPhase({ kind: "ready", plaintext, burnAfterRead: paste.burnAfterRead })
     } catch {
-      setPhase({ kind: "needs-password", paste, error: "Senha incorreta. Tente novamente." })
+      setPhase({ kind: "needs-password", paste, error: t("view.passwordPromptWrong") })
     }
   }
 
   if (phase.kind === "invalid-link") {
     return phase.alreadyViewed ? (
-      <ErrorCard message="Você já abriu esta mensagem nesta aba. Abra o link original novamente se ainda precisar dele." />
+      <ErrorCard message={t("view.alreadyViewed")} />
     ) : (
-      <ErrorCard message='Este link está incompleto: falta a chave de decriptação (o trecho depois de "#").' />
+      <ErrorCard message={t("view.invalidLink")} />
     )
   }
 
   if (phase.kind === "cancelled") {
-    return <ErrorCard message="Leitura cancelada. A mensagem não foi acessada." />
+    return <ErrorCard message={t("view.cancelledMessage")} />
   }
 
   if (phase.kind === "awaiting-burn-confirm") {
     return (
       <>
-        <p className="text-muted-foreground text-sm">Aguardando confirmação...</p>
+        <p className="text-muted-foreground text-sm">{t("view.awaitingConfirm")}</p>
         <BurnConfirmDialog
           open
           onConfirm={() => void load()}
@@ -162,7 +164,7 @@ function ViewPasteInner({ id }: { id?: string }) {
   }
 
   if (phase.kind === "loading") {
-    return <p className="text-muted-foreground text-sm">Carregando...</p>
+    return <p className="text-muted-foreground text-sm">{t("view.loading")}</p>
   }
 
   if (phase.kind === "error") {
@@ -181,11 +183,11 @@ function ViewPasteInner({ id }: { id?: string }) {
   return (
     <Card className="w-full max-w-lg">
       <CardHeader>
-        <CardTitle>Mensagem</CardTitle>
+        <CardTitle>{t("view.title")}</CardTitle>
         {phase.burnAfterRead && (
           <CardDescription className="flex items-center gap-1.5 text-amber-600 dark:text-amber-500">
             <Flame className="size-4" />
-            Esta mensagem foi destruída e não pode ser lida novamente.
+            {t("view.burnedNotice")}
           </CardDescription>
         )}
       </CardHeader>
@@ -200,6 +202,7 @@ function ViewPasteInner({ id }: { id?: string }) {
 // over someone's shoulder, in a screen share, or in a browser preview
 // thumbnail. The user has to deliberately click to reveal it.
 function PasteReveal({ text }: { text: string }) {
+  const { t } = useTranslation()
   const [revealed, setRevealed] = useState(false)
 
   return (
@@ -218,7 +221,7 @@ function PasteReveal({ text }: { text: string }) {
           className="bg-background/60 hover:bg-background/70 absolute inset-0 flex items-center justify-center gap-1.5 rounded-md text-sm font-medium transition-colors"
         >
           <Eye className="size-4" />
-          Revelar mensagem
+          {t("view.revealButton")}
         </button>
       )}
       {revealed && (
@@ -230,7 +233,7 @@ function PasteReveal({ text }: { text: string }) {
           onClick={() => setRevealed(false)}
         >
           <EyeOff className="size-4" />
-          Ocultar
+          {t("view.hideButton")}
         </Button>
       )}
     </div>
@@ -238,10 +241,11 @@ function PasteReveal({ text }: { text: string }) {
 }
 
 function ErrorCard({ message }: { message: string }) {
+  const { t } = useTranslation()
   return (
     <Alert variant="destructive" className="w-full max-w-lg">
       <AlertCircle />
-      <AlertTitle>Não foi possível abrir este link</AlertTitle>
+      <AlertTitle>{t("view.errorTitle")}</AlertTitle>
       <AlertDescription>{message}</AlertDescription>
     </Alert>
   )
@@ -254,6 +258,7 @@ function PasswordPrompt({
   error?: string
   onSubmit: (password: string) => void
 }) {
+  const { t } = useTranslation()
   const [password, setPassword] = useState("")
 
   function handleSubmit(e: FormEvent) {
@@ -264,14 +269,14 @@ function PasswordPrompt({
   return (
     <Card className="w-full max-w-lg">
       <CardHeader>
-        <CardTitle>Esta mensagem tem uma senha</CardTitle>
-        <CardDescription>Digite a senha combinada com quem te enviou o link.</CardDescription>
+        <CardTitle>{t("view.passwordPromptTitle")}</CardTitle>
+        <CardDescription>{t("view.passwordPromptDescription")}</CardDescription>
       </CardHeader>
       <form onSubmit={handleSubmit}>
         <CardContent className="grid gap-4">
           <PasswordField
             id="view-password"
-            label="Senha"
+            label={t("view.passwordFieldLabel")}
             value={password}
             onChange={setPassword}
             autoFocus
@@ -285,7 +290,7 @@ function PasswordPrompt({
         </CardContent>
         <CardFooter>
           <Button type="submit" className="w-full">
-            Decifrar
+            {t("view.decryptButton")}
           </Button>
         </CardFooter>
       </form>
