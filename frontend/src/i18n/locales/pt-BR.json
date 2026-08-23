@@ -4,6 +4,12 @@
     "error": "Erro",
     "cancel": "Cancelar"
   },
+  "theme": {
+    "label": "Tema",
+    "light": "Claro",
+    "dark": "Escuro",
+    "system": "Sistema"
+  },
   "create": {
     "tagline": "Compartilhe texto cifrado que só quem recebe o link consegue ler.",
     "textLabel": "Texto",

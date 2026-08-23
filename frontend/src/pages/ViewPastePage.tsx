@@ -1,7 +1,7 @@
 import { useEffect, useState, type FormEvent } from "react"
 import { useParams } from "react-router-dom"
 import { useTranslation } from "react-i18next"
-import { AlertCircle, Eye, EyeOff, Flame } from "lucide-react"
+import { AlertCircle, Check, Copy, Eye, EyeOff, Flame } from "lucide-react"
 
 import {
   Card,
@@ -204,11 +204,23 @@ function ViewPasteInner({ id }: { id?: string }) {
 function PasteReveal({ text }: { text: string }) {
   const { t } = useTranslation()
   const [revealed, setRevealed] = useState(false)
+  const [copied, setCopied] = useState(false)
+
+  async function handleCopy() {
+    try {
+      await navigator.clipboard.writeText(text)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    } catch {
+      // Clipboard API unavailable/denied; nothing else to fall back to
+      // since the text is intentionally blurred/hidden, not selectable.
+    }
+  }
 
   return (
     <div className="relative">
       <pre
-        className={`bg-muted overflow-x-auto rounded-md p-4 text-left text-sm whitespace-pre-wrap break-words ${
+        className={`bg-muted overflow-x-auto rounded-md p-4 pr-20 text-left text-sm whitespace-pre-wrap break-words ${
           revealed ? "" : "select-none blur-sm"
         }`}
       >
@@ -225,16 +237,28 @@ function PasteReveal({ text }: { text: string }) {
         </button>
       )}
       {revealed && (
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          className="mt-2"
-          onClick={() => setRevealed(false)}
-        >
-          <EyeOff className="size-4" />
-          {t("view.hideButton")}
-        </Button>
+        <div className="absolute top-2 right-2 flex gap-1">
+          <Button
+            type="button"
+            variant="secondary"
+            size="icon"
+            className="size-8"
+            aria-label={copied ? t("shareLink.copied") : t("shareLink.copy")}
+            onClick={handleCopy}
+          >
+            {copied ? <Check className="size-4" /> : <Copy className="size-4" />}
+          </Button>
+          <Button
+            type="button"
+            variant="secondary"
+            size="icon"
+            className="size-8"
+            aria-label={t("view.hideButton")}
+            onClick={() => setRevealed(false)}
+          >
+            <EyeOff className="size-4" />
+          </Button>
+        </div>
       )}
     </div>
   )

@@ -4,6 +4,12 @@
     "error": "Error",
     "cancel": "Cancel"
   },
+  "theme": {
+    "label": "Theme",
+    "light": "Light",
+    "dark": "Dark",
+    "system": "System"
+  },
   "create": {
     "tagline": "Share encrypted text that only the person with the link can read.",
     "textLabel": "Text",
