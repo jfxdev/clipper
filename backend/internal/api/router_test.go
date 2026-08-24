@@ -121,7 +121,7 @@ func TestModeSplitSharedStore(t *testing.T) {
 
 	for name, router := range map[string]http.Handler{"writer": writer, "reader": reader} {
 		rec := httptest.NewRecorder()
-		req := httptest.NewRequest(http.MethodGet, "/api/health", nil)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/health", nil)
 		router.ServeHTTP(rec, req)
 		if rec.Code != http.StatusOK {
 			t.Fatalf("health on %s instance: status = %d", name, rec.Code)
