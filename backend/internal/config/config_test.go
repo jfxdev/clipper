@@ -34,6 +34,24 @@ func TestValidateAcceptsFinitePositiveRateLimitRPS(t *testing.T) {
 	}
 }
 
+func TestValidateMode(t *testing.T) {
+	base := validConfig()
+	for _, mode := range []string{"", "read", "write"} {
+		cfg := base
+		cfg.Mode = mode
+		if err := cfg.validate(); err != nil {
+			t.Fatalf("validate() with Mode=%q: want nil, got %v", mode, err)
+		}
+	}
+	for _, mode := range []string{"readwrite", "READ", "rw", "delete"} {
+		cfg := base
+		cfg.Mode = mode
+		if err := cfg.validate(); err == nil {
+			t.Fatalf("validate() with Mode=%q: want error, got nil", mode)
+		}
+	}
+}
+
 // validConfig is the smallest configuration that passes validate(), so each
 // test can vary exactly the field it is about.
 func validConfig() Config {

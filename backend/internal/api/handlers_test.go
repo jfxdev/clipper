@@ -51,7 +51,7 @@ func newTestRouter(t *testing.T, maxSize int64, rps float64, burst int) http.Han
 		MaxClients: 1000,
 	})
 	t.Cleanup(rl.Close)
-	return NewRouter(h, rl)
+	return NewRouter(h, rl, "")
 }
 
 func doJSON(t *testing.T, router http.Handler, method, path string, body any) *httptest.ResponseRecorder {
@@ -343,7 +343,7 @@ func TestQuotaBlocksStorageFlood(t *testing.T) {
 	h := NewHandlers(s, HandlersConfig{MaxPasteSizeBytes: 4096, MaxExpireSeconds: 3600, Quota: q})
 	rl := NewRateLimiter(RateLimiterConfig{RPS: 1000, Burst: 1000, GlobalRPS: 1e6, GlobalBurst: 1e6, MaxClients: 10})
 	t.Cleanup(rl.Close)
-	router := NewRouter(h, rl)
+	router := NewRouter(h, rl, "")
 
 	body := createPasteRequest{Data: testEnvelope(30), ExpireSeconds: 60, ReadToken: testToken("f")}
 	for i := 0; i < 2; i++ {

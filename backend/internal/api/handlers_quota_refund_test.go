@@ -58,7 +58,7 @@ func TestQuotaRefundOnlyForDefiniteFailures(t *testing.T) {
 			})
 			rl := NewRateLimiter(RateLimiterConfig{RPS: 1000, Burst: 1000, GlobalRPS: 1e6, GlobalBurst: 1e6, MaxClients: 10})
 			t.Cleanup(rl.Close)
-			router := NewRouter(h, rl)
+			router := NewRouter(h, rl, "")
 
 			body := createPasteRequest{
 				Data: testEnvelope(30), ExpireSeconds: 60, ReadToken: testToken("f"),

@@ -34,3 +34,13 @@ type getPasteResponse struct {
 type errorResponse struct {
 	Error string `json:"error"`
 }
+
+// clientConfigResponse tells the SPA which operations this instance serves so
+// it can render the right UI up front (e.g. hide the create form on a
+// read-only instance) instead of only discovering it from a failed request.
+// It reports capabilities, not the MODE value itself, so the response stays a
+// statement about what the client can do rather than a label of the topology.
+type clientConfigResponse struct {
+	CreateEnabled bool `json:"createEnabled"`
+	ReadEnabled   bool `json:"readEnabled"`
+}

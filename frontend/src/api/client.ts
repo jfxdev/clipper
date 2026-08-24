@@ -61,6 +61,17 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return res.json() as Promise<T>
 }
 
+export interface ClientConfig {
+  /** false on a read-only instance (MODE=read): hide the create form. */
+  createEnabled: boolean
+  /** false on a write-only instance (MODE=write): retrieval is disabled. */
+  readEnabled: boolean
+}
+
+export function getClientConfig(): Promise<ClientConfig> {
+  return request<ClientConfig>("/api/config")
+}
+
 export function createPaste(req: CreatePasteRequest): Promise<CreatePasteResponse> {
   return request<CreatePasteResponse>("/api/paste", {
     method: "POST",

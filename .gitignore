@@ -1,6 +1,7 @@
 # Go
 /backend/clipper
 /backend/*.test
+/backend/coverage.out
 /backend/internal/webembed/dist/*
 !/backend/internal/webembed/dist/.gitkeep
 

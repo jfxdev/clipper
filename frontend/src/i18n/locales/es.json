@@ -28,7 +28,9 @@
     "genericError": "No se pudo crear el enlace. Intenta de nuevo.",
     "readyTitle": "Enlace listo",
     "readyDescription": "Comparte este enlace con quien deba leer el mensaje. Solo quien tenga el enlace completo (incluyendo la parte después de \"#\") puede descifrar el contenido — nunca vimos el texto original.",
-    "createAnother": "Crear otro enlace"
+    "createAnother": "Crear otro enlace",
+    "readOnlyTitle": "Instancia de solo lectura",
+    "readOnlyInstance": "Esta instancia es de solo lectura y no acepta mensajes nuevos."
   },
   "burnAfterRead": {
     "label": "Destruir tras la lectura"
@@ -67,6 +69,7 @@
     "passwordFieldLabel": "Contraseña",
     "decryptButton": "Descifrar",
     "revealButton": "Revelar mensaje",
-    "hideButton": "Ocultar"
+    "hideButton": "Ocultar",
+    "writeOnlyInstance": "Esta instancia no puede mostrar mensajes."
   }
 }

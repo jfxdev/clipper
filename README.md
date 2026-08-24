@@ -71,6 +71,7 @@ All configuration is via environment variables (see
 |---|---|---|
 | `PORT` | `8080` | HTTP port |
 | `STORE_BACKEND` | `memory` | `memory` \| `redis` \| `mongo` \| `dynamo` |
+| `MODE` | `""` | Operations this instance serves: `read` (retrieval only) \| `write` (creation only) \| `""` (both). See [Split read/write instances](#split-readwrite-instances) |
 | `REDIS_ADDR` / `REDIS_PASSWORD` / `REDIS_DB` | `localhost:6379` / `""` / `0` | Redis backend |
 | `MONGO_URI` / `MONGO_DATABASE` / `MONGO_COLLECTION` | `mongodb://localhost:27017` / `clipper` / `pastes` | MongoDB backend |
 | `DYNAMO_TABLE` / `DYNAMO_ENDPOINT` / `DYNAMO_REGION` | `clipper_pastes` / `""` / `us-east-1` | DynamoDB backend (`DYNAMO_ENDPOINT` for dynamodb-local) |
@@ -88,6 +89,27 @@ All configuration is via environment variables (see
 Startup logs a warning for configurations that are valid but risky in
 production (in-memory store, `X-Forwarded-For` handling that will either
 collapse or be spoofable, plaintext Redis over a network).
+
+### Split read/write instances
+
+`MODE` restricts which operations a single instance serves, so ingest and
+serving can be scaled and exposed separately over one shared store:
+
+- `MODE=write` — only `POST /api/paste` (creation). Reads return `403`.
+- `MODE=read` — only `GET /api/paste/{id}` (retrieval). Creation returns `403`.
+- `MODE=""` (default) — both.
+
+`GET /api/health` and `GET /api/config` are served in every mode. A disabled
+operation answers `403` with a generic body that never names the mode, so the
+response does not reveal the deployment topology; the frontend localizes the
+condition from the status code. `GET /api/config` reports capabilities
+(`{"createEnabled":…,"readEnabled":…}`), not the mode name, so the SPA can
+render the right UI up front — e.g. a read-only instance shows a notice in
+place of the create form instead of letting a submit fail. Split mode only
+makes sense over a **shared** backend (`redis`,
+`mongo`, `dynamo`) — with `memory` each process has its own store, so a
+write-only node's pastes are invisible to a read-only node, and startup warns
+about this.
 
 ## Development
 

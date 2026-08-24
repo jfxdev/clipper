@@ -28,7 +28,9 @@
     "genericError": "Failed to create the link. Try again.",
     "readyTitle": "Link ready",
     "readyDescription": "Share this link with whoever should read the message. Only someone with the complete link (including the part after \"#\") can decrypt the content — we never saw the original text.",
-    "createAnother": "Create another link"
+    "createAnother": "Create another link",
+    "readOnlyTitle": "Read-only instance",
+    "readOnlyInstance": "This instance is read-only and can't accept new messages."
   },
   "burnAfterRead": {
     "label": "Destroy after reading"
@@ -67,6 +69,7 @@
     "passwordFieldLabel": "Password",
     "decryptButton": "Decrypt",
     "revealButton": "Reveal message",
-    "hideButton": "Hide"
+    "hideButton": "Hide",
+    "writeOnlyInstance": "This instance can't display messages."
   }
 }
