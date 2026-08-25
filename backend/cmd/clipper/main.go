@@ -97,7 +97,7 @@ func main() {
 	defer rateLimiter.Close()
 
 	mux := http.NewServeMux()
-	mux.Handle("/api/", api.NewRouter(handlers, rateLimiter))
+	mux.Handle("/api/", api.NewRouter(handlers, rateLimiter, cfg.Mode))
 	mux.Handle("GET /.well-known/security.txt", webembed.SecurityTxtHandler())
 	mux.Handle("/", spa)
 
@@ -132,9 +132,14 @@ func main() {
 		_ = srv.Shutdown(shutdownCtx)
 	}()
 
+	mode := cfg.Mode
+	if mode == "" {
+		mode = "read+write"
+	}
 	logger.Info("clipper listening",
 		slog.String("addr", srv.Addr),
 		slog.String("store", cfg.StoreBackend),
+		slog.String("mode", mode),
 	)
 	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		logger.Error("server", slog.Any("error", err))

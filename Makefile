@@ -1,4 +1,11 @@
-.PHONY: build-frontend build test test-race test-integration test-fuzz run dev docker-build audit clean
+.PHONY: build-frontend build test test-cover test-race test-integration test-fuzz run dev docker-build audit clean
+
+# Packages with pure unit tests (no external deps). cmd/clipper and the
+# redis/mongo/dynamo stores are excluded: they are exercised by the
+# integration suite, not `go test ./...`, so gating them here would enforce a
+# floor the unit run structurally cannot meet.
+COVER_PKGS := ./internal/api/... ./internal/config/... ./internal/paste/... ./internal/store/memory/...
+COVER_MIN := 70
 
 build-frontend:
 	cd frontend && npm ci && npm run build
@@ -16,6 +23,16 @@ build: build-frontend
 test:
 	cd backend && go test ./...
 	cd frontend && npm test -- --run
+
+# Enforce a coverage floor on the unit-tested packages. Fails the build if
+# total statement coverage drops below COVER_MIN, so regressions in test
+# coverage surface in CI rather than silently.
+test-cover:
+	cd backend && go test -coverprofile=coverage.out $(COVER_PKGS)
+	@cd backend && go tool cover -func=coverage.out | awk -v min=$(COVER_MIN) '\
+		/^total:/ { pct = $$3; sub(/%/, "", pct); \
+			printf "total coverage: %s (floor %d%%)\n", $$3, min; \
+			if (pct + 0 < min) { print "FAIL: below coverage floor"; exit 1 } }'
 
 # The burn-after-read contract is a concurrency guarantee, so the race
 # detector is part of the real test run, not an extra.
@@ -87,5 +104,5 @@ docker-build:
 	docker build -t clipper .
 
 clean:
-	rm -rf backend/clipper frontend/dist backend/internal/webembed/dist/*
+	rm -rf backend/clipper backend/coverage.out frontend/dist backend/internal/webembed/dist/*
 	touch backend/internal/webembed/dist/.gitkeep

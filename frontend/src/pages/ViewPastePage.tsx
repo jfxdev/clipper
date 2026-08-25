@@ -111,7 +111,11 @@ function ViewPasteInner({ id }: { id?: string }) {
           err instanceof ApiError
             ? err.status === 404
               ? t("view.notFound")
-              : err.message
+              : err.status === 403
+                ? // MODE=write instance: reads disabled. Body is generic;
+                  // wording is localized here.
+                  t("view.writeOnlyInstance")
+                : err.message
             : t("view.decryptError"),
       })
     }

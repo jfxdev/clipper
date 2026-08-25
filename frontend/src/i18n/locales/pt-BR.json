@@ -28,7 +28,9 @@
     "genericError": "Falha ao criar o link. Tente novamente.",
     "readyTitle": "Link pronto",
     "readyDescription": "Compartilhe este link com quem deve ler a mensagem. Só quem tiver o link completo (incluindo o trecho depois de \"#\") consegue decifrar o conteúdo — nós nunca vimos o texto original.",
-    "createAnother": "Criar outro link"
+    "createAnother": "Criar outro link",
+    "readOnlyTitle": "Instância somente leitura",
+    "readOnlyInstance": "Esta instância é somente leitura e não aceita novas mensagens."
   },
   "burnAfterRead": {
     "label": "Destruir após a leitura"
@@ -67,6 +69,7 @@
     "passwordFieldLabel": "Senha",
     "decryptButton": "Decifrar",
     "revealButton": "Revelar mensagem",
-    "hideButton": "Ocultar"
+    "hideButton": "Ocultar",
+    "writeOnlyInstance": "Esta instância não pode exibir mensagens."
   }
 }

@@ -18,6 +18,13 @@ type Config struct {
 	// "memory", "redis", "mongo", or "dynamo".
 	StoreBackend string
 
+	// Mode restricts which API operations this instance serves: "read"
+	// exposes only paste retrieval, "write" only paste creation, and the
+	// empty default serves both. It lets a deployment split ingest and serve
+	// nodes over the same store. The gate lives in the router; disabled
+	// operations answer 403 with a generic body that never names the mode.
+	Mode string
+
 	RedisAddr     string
 	RedisPassword string
 	RedisDB       int
@@ -74,6 +81,7 @@ func Load() (Config, error) {
 	cfg := Config{
 		Port:              getEnv("PORT", "8080"),
 		StoreBackend:      getEnv("STORE_BACKEND", "memory"),
+		Mode:              getEnv("MODE", ""),
 		RedisAddr:         getEnv("REDIS_ADDR", "localhost:6379"),
 		RedisPassword:     getEnv("REDIS_PASSWORD", ""),
 		MongoURI:          getEnv("MONGO_URI", "mongodb://localhost:27017"),
@@ -146,6 +154,11 @@ func (c Config) validate() error {
 	default:
 		return fmt.Errorf("config: invalid STORE_BACKEND %q (want memory|redis|mongo|dynamo)", c.StoreBackend)
 	}
+	switch c.Mode {
+	case "", "read", "write":
+	default:
+		return fmt.Errorf("config: invalid MODE %q (want read|write or empty)", c.Mode)
+	}
 	if c.MaxPasteSizeBytes <= 0 {
 		return fmt.Errorf("config: MAX_PASTE_SIZE_BYTES must be positive, got %d", c.MaxPasteSizeBytes)
 	}
@@ -196,6 +209,9 @@ func (c Config) Warnings() []string {
 	var w []string
 	if c.StoreBackend == "memory" {
 		w = append(w, "STORE_BACKEND=memory keeps every paste in process memory: data is lost on restart and not shared between replicas. Use redis, mongo, or dynamo in production.")
+		if c.Mode == "read" || c.Mode == "write" {
+			w = append(w, "MODE splits reads and writes across instances, but STORE_BACKEND=memory is per-process: a write-only node's pastes are invisible to a read-only node. Use a shared backend (redis, mongo, or dynamo) with MODE.")
+		}
 	}
 	if c.TrustProxy && len(c.TrustedProxies) == 0 {
 		w = append(w, "TRUST_PROXY=true accepts X-Forwarded-For from any direct peer. If the process is reachable without going through your reverse proxy, clients can spoof their address and bypass rate limiting. Prefer TRUSTED_PROXIES with your proxy's CIDR.")

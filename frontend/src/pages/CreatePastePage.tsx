@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from "react"
+import { useEffect, useState, type FormEvent } from "react"
 import { useTranslation } from "react-i18next"
 import { AlertCircle } from "lucide-react"
 
@@ -19,7 +19,7 @@ import { BurnAfterReadToggle } from "@/components/BurnAfterReadToggle"
 import { PasswordField } from "@/components/PasswordField"
 import { ShareLinkBox } from "@/components/ShareLinkBox"
 import { encryptText } from "@/crypto/crypto"
-import { createPaste, ApiError } from "@/api/client"
+import { createPaste, getClientConfig, ApiError } from "@/api/client"
 import { buildShareUrl } from "@/lib/shareLink"
 
 const DEFAULT_EXPIRE_SECONDS = 86400 // 1 day
@@ -39,6 +39,26 @@ export function CreatePastePage() {
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [shareUrl, setShareUrl] = useState<string | null>(null)
+  // null while the instance capabilities are still loading. On a read-only
+  // instance (MODE=read) the create form is replaced by a notice instead of
+  // letting the user fill it in only to have the submit rejected.
+  const [createEnabled, setCreateEnabled] = useState<boolean | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    getClientConfig()
+      .then((cfg) => {
+        if (!cancelled) setCreateEnabled(cfg.createEnabled)
+      })
+      // If the probe itself fails, assume creation is available and let the
+      // submit path surface any real error rather than hiding the form.
+      .catch(() => {
+        if (!cancelled) setCreateEnabled(true)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
@@ -69,7 +89,13 @@ export function CreatePastePage() {
       setText("")
       setPassword("")
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : t("create.genericError"))
+      if (err instanceof ApiError) {
+        // 403 here means this instance is read-only (MODE=read). The server
+        // sends a generic body; the mode-specific wording lives in i18n.
+        setError(err.status === 403 ? t("create.readOnlyInstance") : err.message)
+      } else {
+        setError(t("create.genericError"))
+      }
     } finally {
       setSubmitting(false)
     }
@@ -90,6 +116,21 @@ export function CreatePastePage() {
             {t("create.createAnother")}
           </Button>
         </CardFooter>
+      </Card>
+    )
+  }
+
+  if (createEnabled === null) {
+    return <p className="text-muted-foreground text-sm">{t("view.loading")}</p>
+  }
+
+  if (!createEnabled) {
+    return (
+      <Card className="w-full max-w-lg">
+        <CardHeader>
+          <CardTitle>{t("create.readOnlyTitle")}</CardTitle>
+          <CardDescription>{t("create.readOnlyInstance")}</CardDescription>
+        </CardHeader>
       </Card>
     )
   }
