@@ -15,7 +15,7 @@ RUN npm run build
 # will never be fixed on that line and end up compiled into the binary. The
 # builder tracks a supported release; backend/go.mod pins the same toolchain
 # so a local `make build` cannot produce a weaker binary than the image.
-FROM golang:1.27-alpine@sha256:4c9fe60190a2a3350ddc51de80d0224b8a6698d12bdfc999fee45ea9d6c46dbc AS backend-build
+FROM golang:1.27-alpine@sha256:cf6fca6641884b8433441b2b0652976f975e1d0fdd26d177eaaf8596087f3125 AS backend-build
 WORKDIR /src/backend
 COPY backend/go.mod backend/go.sum ./
 RUN go mod download
